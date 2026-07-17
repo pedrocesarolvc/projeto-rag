@@ -1,0 +1,23 @@
+# Dependências do projeto, organizadas pela camada da stack (ver
+# docs/documentacao.md). Cada bloco entra em uso quando a etapa
+# correspondente é implementada.
+
+# API
+fastapi
+uvicorn[standard]
+
+# Validação (contratos entre etapas — app/modelos.py)
+pydantic
+
+# Configuração via variável de ambiente — app/config.py
+python-dotenv
+
+# Extração de PDF — Etapa 2 (app/ingestao/extrator.py)
+pymupdf
+
+# Banco de dados: PostgreSQL + pgvector — Etapa 3 (armazenamento)
+psycopg[binary]
+pgvector
+
+# Testes
+pytest

@@ -1,0 +1,13 @@
+# Segredos reais (o exemplo sem segredos é .env.example, que fica versionado)
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# PDFs de usuário enviados via upload (não confundir com tests/fixtures/,
+# que guarda PDFs de teste versionados de propósito)
+uploads/

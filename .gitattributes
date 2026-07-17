@@ -1,0 +1,4 @@
+# PDFs são binários por natureza (mesmo quando o conteúdo, como em
+# tests/fixtures/corrompido.pdf, parece texto). Sem isto, o Git pode
+# normalizar quebras de linha e alterar os bytes do arquivo.
+*.pdf binary

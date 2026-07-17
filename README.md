@@ -36,10 +36,3 @@ tests/
 ├── fixtures/                # PDFs de teste
 └── test_ingestao.py
 ```
-
-As pastas são as etapas: uma pasta nasce quando o código dela nasce, não antes.
-
-## Status
-
-Etapa 1 concluída (visão, problema e escopo). Estrutura de pastas criada; o código da Etapa 2
-(ingestão) ainda não foi implementado.

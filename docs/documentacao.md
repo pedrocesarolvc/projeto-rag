@@ -7,7 +7,7 @@
 |---|---|---|
 | **1** | Visão, problema e escopo | ✅ escrita |
 | **2** | Ingestão — upload e extração de texto | ✅ escrita |
-| 3 | Chunking — divisão do texto | ⬜ pendente |
+| **3** | Chunking — divisão do texto | ✅ escrita |
 | 4 | Indexação — embeddings e pgvector | ⬜ pendente |
 | 5 | Recuperação — a busca | ⬜ pendente |
 | 6 | Geração — prompt, resposta e citação | ⬜ pendente |
@@ -85,7 +85,7 @@ Um projeto de portfólio terminado vale mais do que um projeto ambicioso abandon
 |---|---|
 | Upload | Um PDF por vez |
 | Extração de texto | Apenas PDF |
-| Divisão do texto | Tamanho fixo com sobreposição |
+| Divisão do texto | Corte recursivo por separadores, com sobreposição |
 | Vetorização | Um modelo de embedding, sem comparações |
 | Armazenamento | PostgreSQL com a extensão pgvector |
 | Busca | Apenas semântica (por similaridade) |
@@ -290,6 +290,172 @@ Guarde os PDFs de teste no repositório em `tests/fixtures/`. São arquivos pequ
 
 ---
 
+# Etapa 3 — Chunking
+
+## 3.1 O que esta etapa faz
+
+**Entra:** a lista de páginas com texto, entregue pela Etapa 2.
+**Sai:** uma lista de chunks — pedaços de texto — cada um carregando a página de onde veio.
+
+Ainda é fase de indexação, e ainda não tem IA. É recorte de string. Mas é a decisão mais consequente do projeto inteiro, e a razão está na próxima seção.
+
+## 3.2 Por que o chunk decide tudo
+
+O chunk é, ao mesmo tempo, três coisas:
+
+- **a unidade de busca** — é o chunk que vira vetor, e é entre chunks que a busca compara
+- **a unidade de contexto** — é o chunk que vai dentro do prompt da LLM
+- **a unidade de citação** — é o chunk que o usuário vê como "de onde saiu essa resposta"
+
+Uma decisão, três consequências. Errar o chunk estraga a busca, o prompt e a citação de uma vez — e nenhuma etapa posterior conserta.
+
+**O motivo que quase ninguém explica: diluição**
+
+A razão óbvia para dividir é que um PDF de 300 páginas não cabe no prompt. Verdade, mas é a razão menos interessante.
+
+A razão de verdade é esta: um chunk gera um único vetor. Um só. Aquele vetor precisa representar o significado do chunk inteiro.
+
+Se o chunk fala de um assunto, o vetor aponta com precisão para aquele assunto. Se o chunk fala de cinco assuntos, o vetor é a média dos cinco — e média de cinco significados não é nenhum dos cinco. É como misturar cinco tintas de cores diferentes: o resultado não é nenhuma delas, é um marrom que não serve para nada.
+
+Um chunk grande demais produz um vetor sem foco. Ele fica vagamente parecido com tudo e fortemente parecido com nada — e some da busca justamente quando a pergunta é específica.
+
+**Chunk pequeno não é economia. É foco.**
+
+## 3.3 O dilema do tamanho
+
+Se pequeno é focado, por que não cortar tudo em frases soltas?
+
+Porque o chunk também precisa se sustentar sozinho. Ele será lido fora de contexto — pela busca e pela LLM — e ninguém vai buscar o que veio antes.
+
+Considere este chunk:
+
+> "Ele deverá ser comunicado com 90 dias de antecedência."
+
+Quem é "ele"? O chunk anterior dizia "o distrato". Este aqui, sozinho, não significa nada: o vetor dele aponta para "algo com prazo de 90 dias", e a pergunta "qual o prazo de rescisão?" passa longe. O pronome ficou órfão.
+
+| Chunk grande demais | Chunk pequeno demais |
+|---|---|
+| Vetor diluído, some da busca | Vetor focado, mas em nada útil |
+| Enche o prompt de ruído | Perde o sujeito da frase |
+| Citação vaga: "está nesta página aí" | Referências órfãs, pronomes sem dono |
+| Custa mais tokens por pergunta | Fragmenta uma ideia em cinco pedaços |
+
+Não existe tamanho universalmente certo. Existe o tamanho certo para o seu tipo de documento, e ele se descobre medindo — que é exatamente o que os evals fazem, e por isso eles estão no roadmap.
+
+## 3.4 Sobreposição (overlap)
+
+O corte é cego: ele cai onde cair, e muitas vezes cai no meio de uma ideia.
+
+A sobreposição resolve isso repetindo o final do chunk anterior no início do próximo. A ideia cortada aparece inteira em pelo menos um dos dois.
+
+```
+Chunk 1: [────────────────────]
+Chunk 2:                 [────────────────────]
+                          ↑ repete o fim do anterior
+```
+
+Valor típico: 10% a 20% do tamanho do chunk.
+
+O preço: o texto repetido ocupa espaço no banco, e o mesmo trecho pode ser recuperado duas vezes pela busca. É um preço barato perto de mutilar uma cláusula ao meio.
+
+## 3.5 As estratégias de corte
+
+| Estratégia | Como funciona | A favor | Contra |
+|---|---|---|---|
+| Tamanho fixo | Corta a cada N caracteres | Trivial de escrever | Corta no meio da palavra, da frase, da ideia |
+| Recursivo por separadores | Tenta cortar em `\n\n`; se o pedaço ainda for grande, tenta `\n`; depois `.`; depois espaço | Respeita fronteiras naturais do texto | Ainda usa tamanho como teto |
+| Estruturado | Corta por seção, cláusula, título | Melhor qualidade possível | Depende de detectar estrutura — que o PDF não entrega (ver Etapa 2) |
+| Semântico | Corta onde o assunto muda, medindo por embedding | Sofisticado | Caro e complexo; vetoriza para decidir onde vetorizar |
+
+**A decisão do v1: corte recursivo**
+
+Correção honesta: a Etapa 1 dizia "tamanho fixo com sobreposição". Escrevendo esta etapa, isso está errado. O corte recursivo custa umas vinte linhas a mais e é muito melhor — parágrafo é uma fronteira de significado, e cortar nele é praticamente de graça. A Etapa 1 já foi corrigida.
+
+Documentação é viva. Revisar uma decisão quando você entende melhor o problema não é falha de planejamento — é o planejamento funcionando.
+
+Por que não o estruturado: ele depende de saber onde começa uma seção. E a Etapa 2 já estabeleceu que o PDF não guarda estrutura — guarda glifos em coordenadas. Detectar título por tamanho de fonte é heurística frágil, e vira um projeto dentro do projeto. Fica no roadmap.
+
+## 3.6 Escolhendo os números
+
+Caractere ou token? O modelo de embedding conta em tokens, não em caracteres. Token é o pedaço de palavra que o modelo enxerga — em português, um token dá mais ou menos 4 caracteres. Todo modelo de embedding tem um teto de tokens; passar do teto significa texto silenciosamente truncado, e o final do chunk simplesmente não existe para a busca.
+
+Ponto de partida do v1:
+
+| Parâmetro | Valor | Por quê |
+|---|---|---|
+| Tamanho do chunk | ~400 tokens (~1600 caracteres) | Cabe um parágrafo ou dois — grande o bastante para se sustentar, pequeno o bastante para focar |
+| Sobreposição | ~60 tokens (15%) | Cobre a ideia cortada na fronteira |
+
+Esses números são um chute educado, e está tudo bem. Sem evals, não há como afirmar que 400 é melhor que 300 — só há como afirmar que é razoável. Declare isso no README em vez de fingir precisão que não existe.
+
+Você vai querer mudar esses números. É exatamente por isso que a Etapa 2 decidiu guardar o PDF original: reindexar com outro tamanho, sem pedir upload de novo.
+
+## 3.7 O chunk que atravessa a página
+
+Aqui aparece um conflito que só existe porque a Etapa 2 tomou a decisão certa de guardar a página.
+
+Se você juntar todas as páginas num texto só e cortar, um chunk pode começar na página 4 e terminar na 5. Aí "qual é a página deste chunk?" não tem resposta única — precisa virar `pagina_inicial` e `pagina_final`, e o corte precisa rastrear posição durante a concatenação.
+
+**Decisão do v1:** o chunk nunca atravessa a página. Corta-se dentro de cada página, independentemente.
+
+O que se ganha: página não ambígua, citação exata, código simples.
+
+O que se perde: um parágrafo que atravessa a virada de página vira dois chunks mutilados — exatamente o problema do pronome órfão da seção 3.3, agora causado pela sua própria decisão.
+
+É um trade-off real, não uma escolha óbvia. O v1 escolhe a citação exata; o roadmap fica com o chunk multipágina. Isso vai no README como limitação conhecida.
+
+## 3.8 O contrato de saída
+
+```python
+[
+    {
+        "indice": 0,          # posição do chunk no documento
+        "pagina": 1,
+        "texto": "...",
+    },
+    {
+        "indice": 1,
+        "pagina": 1,
+        "texto": "...",
+    },
+]
+```
+
+O `indice` serve para ordenar e para uma melhoria futura barata: ao exibir a citação, mostrar o chunk vizinho para dar contexto ao usuário.
+
+A Etapa 4 acrescenta o vetor a cada um desses registros. O contrato cresce; a forma não muda.
+
+## 3.9 Como testar
+
+Chunking é determinístico — dá para testar de verdade, como a ingestão. Aproveite, porque a partir da Etapa 5 acaba a certeza.
+
+- Texto menor que o tamanho do chunk → devolve exatamente 1 chunk
+- Texto vazio → devolve 0 chunks
+- Nenhum chunk excede o tamanho máximo
+- Nenhuma palavra é cortada ao meio
+- Todo chunk carrega uma página válida
+- Nenhum chunk atravessa páginas
+- A sobreposição existe de fato: o fim do chunk N aparece no início do chunk N+1
+- Os índices são sequenciais e sem buraco
+- Um parágrafo curto seguido de outro não é fundido nem estilhaçado
+
+O teste da sobreposição é o que mais pega bug. É fácil escrever um splitter que parece sobrepor e não sobrepõe.
+
+## 3.10 Glossário desta etapa
+
+| Termo | O que é |
+|---|---|
+| **Chunk** | Um pedaço do documento. Unidade de busca, de contexto e de citação, ao mesmo tempo |
+| **Chunking** | O processo de dividir o texto em chunks |
+| **Overlap (sobreposição)** | Repetir o fim de um chunk no início do seguinte, para não mutilar ideias na fronteira |
+| **Token** | O pedaço de palavra que o modelo enxerga. Em português, cerca de 4 caracteres |
+| **Diluição** | O efeito de um chunk com muitos assuntos gerar um vetor que é a média deles — e não representa nenhum |
+| **Splitter recursivo** | Cortador que tenta separadores em ordem de prioridade: parágrafo, linha, frase, palavra |
+| **Truncamento** | Quando o texto passa do limite de tokens do modelo e o excedente é descartado em silêncio |
+| **Granularidade** | O tamanho da unidade escolhida. Grossa = chunks grandes; fina = chunks pequenos |
+
+---
+
 ## Próxima etapa
 
-**Etapa 3 — Chunking:** por que dividir o texto, onde cortar, e por que essa é a decisão mais subestimada do projeto inteiro.
+**Etapa 4 — Indexação:** como o texto vira vetor, o que é um embedding de verdade, e como o pgvector guarda e busca por proximidade.

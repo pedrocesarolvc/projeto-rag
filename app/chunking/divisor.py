@@ -18,10 +18,13 @@ chunk é sempre uma única página, nunca um intervalo. Trade-off
 assumido, não escondido (seção 3.7).
 """
 
-# Chute educado, não medido — não há evals ainda (Etapa 3, seção 3.6).
-# ~400 tokens / ~60 tokens, a ~4 caracteres por token em português.
-TAMANHO_CHUNK_CARACTERES = 1600
-SOBREPOSICAO_CARACTERES = 240
+# Chute educado, corrigido por medição (Etapa 3 previa ~1600/~240
+# caracteres; medido depois, na Etapa 4, que o modelo de embedding
+# escolhido trunca silenciosamente acima de 128 tokens — ~500
+# caracteres em português. Ver docs/documentacao.md, Etapa 4, nota
+# sobre truncamento).
+TAMANHO_CHUNK_CARACTERES = 450
+SOBREPOSICAO_CARACTERES = 70
 
 # Do mais para o menos prioritário: tenta preservar a fronteira de
 # significado mais forte (parágrafo) antes de recorrer a um corte

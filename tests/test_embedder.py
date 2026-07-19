@@ -10,7 +10,8 @@ parecido.
 
 import math
 
-from app.indexacao.embedder import DIMENSAO, gerar_embeddings
+from app.chunking.divisor import TAMANHO_CHUNK_CARACTERES
+from app.indexacao.embedder import DIMENSAO, _carregar_modelo, gerar_embeddings
 
 
 def _distancia_cosseno(a: list[float], b: list[float]) -> float:
@@ -52,3 +53,28 @@ def test_textos_parecidos_ficam_mais_perto_que_textos_distantes():
     distancia_longe = _distancia_cosseno(cachorro, planilha)
 
     assert distancia_perto < distancia_longe
+
+
+# --- regressão: o chunk padrão da Etapa 3 cabe no teto do modelo ---
+
+
+def test_tamanho_padrao_do_chunk_cabe_no_teto_do_modelo():
+    """
+    Bug real, encontrado depois de escrita a Etapa 4: o chunk_size da
+    Etapa 3 (~1600 caracteres) estourava o max_seq_length deste modelo
+    (128 tokens) — um chunk virava vetor de só ~37% do próprio texto,
+    em silêncio, sem erro nenhum (o mesmo risco que a seção 3.6 já
+    descrevia). Corrigido reduzindo o chunk (seção 3.6 atualizada).
+    Este teste garante que os dois números não voltem a divergir se
+    o tamanho do chunk ou o modelo mudarem no futuro.
+    """
+    texto_realista = (
+        "O distrato devera ser comunicado com noventa dias de antecedencia, "
+        "por escrito, a parte interessada, sob pena de multa contratual. "
+    )
+    texto = (texto_realista * 10)[:TAMANHO_CHUNK_CARACTERES]
+
+    modelo = _carregar_modelo()
+    tokens = modelo.tokenizer(texto, truncation=False)
+
+    assert len(tokens["input_ids"]) <= modelo.max_seq_length

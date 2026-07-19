@@ -51,7 +51,7 @@ tests/
 | Limitação | Motivo |
 |---|---|
 | Chunk nunca atravessa página | Um parágrafo que atravessa a virada de página vira dois chunks. Trocado por citação sem ambiguidade — a página de um chunk nunca é um intervalo (ver `docs/documentacao.md`, Etapa 3, seção 3.7) |
-| Tamanho do chunk (~1600 caracteres) e sobreposição (~15%) são um chute educado | Sem evals ainda, não há como medir se esses números são os certos para este tipo de documento — só que são razoáveis. Evals estão no roadmap |
+| Tamanho do chunk (~450 caracteres) e sobreposição (~15%) são um chute educado | Ajustado para caber no teto de 128 tokens do modelo de embedding local (acima disso, o modelo trunca em silêncio — ver `docs/documentacao.md`, Etapa 4). Ainda sem evals para validar se é o tamanho ideal para este tipo de documento |
 | `tests/test_armazenador.py` pula sem Docker num Windows local | pgvector não tem binário para Windows — exigiria compilar com Visual Studio Build Tools. A imagem `pgvector/pgvector` do Docker (Etapa 7) resolve isso sem build manual |
 
 ## Rodando localmente

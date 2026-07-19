@@ -383,10 +383,12 @@ Ponto de partida do v1:
 
 | Parâmetro | Valor | Por quê |
 |---|---|---|
-| Tamanho do chunk | ~400 tokens (~1600 caracteres) | Cabe um parágrafo ou dois — grande o bastante para se sustentar, pequeno o bastante para focar |
-| Sobreposição | ~60 tokens (15%) | Cobre a ideia cortada na fronteira |
+| Tamanho do chunk | ~110 tokens (~450 caracteres) | Cabe dentro do teto de 128 tokens do modelo de embedding escolhido na Etapa 4, com margem |
+| Sobreposição | ~15 tokens (15%) | Cobre a ideia cortada na fronteira |
 
-Esses números são um chute educado, e está tudo bem. Sem evals, não há como afirmar que 400 é melhor que 300 — só há como afirmar que é razoável. Declare isso no README em vez de fingir precisão que não existe.
+Esses números são um chute educado, e está tudo bem. Sem evals, não há como afirmar que o tamanho ideal é exatamente este — só há como afirmar que é razoável. Declare isso no README em vez de fingir precisão que não existe.
+
+**Correção, feita na Etapa 4:** esta seção originalmente propunha ~400 tokens (~1600 caracteres). Medindo depois, na Etapa 4, descobri que o modelo de embedding escolhido trunca silenciosamente acima de 128 tokens — exatamente o risco que o primeiro parágrafo desta seção descreve. Um chunk de 1600 caracteres virava vetor de só ~37% do seu próprio texto. Números ajustados para caber no modelo de verdade, não no chute original.
 
 Você vai querer mudar esses números. É exatamente por isso que a Etapa 2 decidiu guardar o PDF original: reindexar com outro tamanho, sem pedir upload de novo.
 
@@ -618,6 +620,8 @@ Esse terceiro teste é o mais valioso do projeto até aqui: ele verifica, em có
 | **Reindexar** | Gerar os vetores de novo. Necessário se o modelo ou o chunking mudarem |
 
 Um lembrete que vem do seu próprio insight: a dimensão da coluna (`vector(768)` ou o que o seu modelo produzir) tem que bater exata com o que o modelo gera. Erro de dimensão estoura na primeira inserção, e a mensagem do Postgres nem sempre é óbvia — se der um erro estranho ao inserir vetor, olhe a dimensão primeiro.
+
+**Um segundo lembrete, que a dimensão sozinha não cobre:** dimensão errada estoura na hora — é barulhento, você percebe na primeira inserção. O teto de tokens do modelo (`max_seq_length`) é o oposto: estoura em silêncio. O modelo local escolhido nesta etapa aceita só 128 tokens; o tamanho de chunk da Etapa 3 previa ~400. Um chunk de 1600 caracteres virava vetor de apenas ~37% do próprio texto — sem erro, sem aviso, só busca pior. A Etapa 3 já foi corrigida (seção 3.6) para caber no teto real do modelo. Ao trocar de modelo de embedding no futuro, confira os dois números — dimensão e `max_seq_length` — não só o primeiro.
 
 ---
 

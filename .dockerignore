@@ -1,0 +1,14 @@
+# Mantém o contexto de build enxuto — nada aqui precisa viajar para
+# dentro da imagem.
+.venv/
+.git/
+.pytest_cache/
+__pycache__/
+*.pyc
+uploads/
+.env
+tests/
+docs/
+frontend/node_modules/
+frontend/dist/
+.claude/

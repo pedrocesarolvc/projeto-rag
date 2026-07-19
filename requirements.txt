@@ -5,6 +5,7 @@
 # API
 fastapi
 uvicorn[standard]
+python-multipart  # necessário para o FastAPI aceitar upload de arquivo (POST /documentos)
 
 # Validação (contratos entre etapas — app/modelos.py)
 pydantic
@@ -27,3 +28,4 @@ ollama
 
 # Testes
 pytest
+httpx  # TestClient do FastAPI (testes de ponta a ponta — Etapa 7)

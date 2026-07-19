@@ -7,8 +7,13 @@ e grava tudo na tabela `chunks` — o último passo da fase de indexação
 de propósito: o vetor serve para achar; o texto, para usar na
 citação e no prompt (seção 4.9).
 
-Sem framework de migração no v1: uma tabela, um DDL, direto — o mesmo
-espírito de "sem LangChain" aplicado ao lado do banco.
+Sem framework de migração no v1: duas tabelas, um DDL, direto — o
+mesmo espírito de "sem LangChain" aplicado ao lado do banco.
+
+Etapa 7: a tabela `documentos` nasce aqui, não antes — `chunks.documento_id`
+sempre existiu no contrato (seção 4.9), mas só a API precisa de um
+lugar para guardar o nome original do arquivo e o status
+(indexando/pronto/falhou) de cada upload (seção 7.2).
 """
 
 import psycopg
@@ -34,14 +39,24 @@ def conectar() -> psycopg.Connection:
     return conexao
 
 
-def criar_tabela(conexao: psycopg.Connection) -> None:
+def criar_tabelas(conexao: psycopg.Connection) -> None:
     """
-    Cria a tabela `chunks` (seção 4.9) se ainda não existir. A
-    dimensão do vetor vem de embedder.DIMENSAO — nunca um número
-    solto repetido aqui, para que coluna e modelo nunca possam
+    Cria as tabelas `documentos` e `chunks` (seção 4.9) se ainda não
+    existirem. A dimensão do vetor vem de embedder.DIMENSAO — nunca um
+    número solto repetido aqui, para que coluna e modelo nunca possam
     divergir silenciosamente (seção 4.6: dimensão errada estoura na
     primeira inserção).
     """
+    conexao.execute(
+        """
+        CREATE TABLE IF NOT EXISTS documentos (
+            id            BIGSERIAL PRIMARY KEY,
+            nome_original TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'indexando',
+            criado_em     TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
     conexao.execute(
         f"""
         CREATE TABLE IF NOT EXISTS chunks (
@@ -55,6 +70,48 @@ def criar_tabela(conexao: psycopg.Connection) -> None:
         """
     )
     conexao.commit()
+
+
+def criar_documento(conexao: psycopg.Connection, nome_original: str) -> int:
+    """
+    Registra um novo documento com status "indexando" e devolve o id
+    gerado — usado por POST /documentos antes de rodar a extração e o
+    chunking, para já existir um id a que os chunks se associam.
+    """
+    with conexao.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO documentos (nome_original) VALUES (%s) RETURNING id",
+            (nome_original,),
+        )
+        (documento_id,) = cursor.fetchone()
+    conexao.commit()
+    return documento_id
+
+
+def atualizar_status_documento(
+    conexao: psycopg.Connection, documento_id: int, status: str
+) -> None:
+    """status: "indexando" | "pronto" | "falhou" (seção 7.2)."""
+    conexao.execute(
+        "UPDATE documentos SET status = %s WHERE id = %s", (status, documento_id)
+    )
+    conexao.commit()
+
+
+def buscar_documento(conexao: psycopg.Connection, documento_id: int) -> dict | None:
+    """Usado por GET /documentos/{id}. None se o id não existir."""
+    with conexao.cursor() as cursor:
+        cursor.execute(
+            "SELECT id, nome_original, status FROM documentos WHERE id = %s",
+            (documento_id,),
+        )
+        linha = cursor.fetchone()
+
+    if linha is None:
+        return None
+
+    documento_id, nome_original, status = linha
+    return {"id": documento_id, "nome_original": nome_original, "status": status}
 
 
 def indexar(conexao: psycopg.Connection, documento_id: int, chunks: list[dict]) -> None:

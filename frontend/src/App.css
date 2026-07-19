@@ -1,0 +1,79 @@
+.pagina {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 48px 20px;
+}
+
+h1 {
+  font-size: 28px;
+  margin: 0 0 8px;
+}
+
+.subtitulo {
+  color: var(--text-muted, #666);
+  margin: 0 0 32px;
+}
+
+.cartao {
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.upload {
+  display: block;
+  cursor: pointer;
+  text-align: center;
+  padding: 12px;
+}
+
+.upload input {
+  display: none;
+}
+
+.form-pergunta {
+  display: flex;
+  gap: 8px;
+}
+
+.form-pergunta input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 16px;
+}
+
+.form-pergunta button {
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.erro {
+  color: #c0392b;
+}
+
+.texto-resposta {
+  font-size: 17px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.citacoes h2 {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #666);
+  margin: 24px 0 8px;
+}
+
+.citacao {
+  border-left: 3px solid var(--border, #ddd);
+  margin: 0 0 12px;
+  padding: 4px 0 4px 12px;
+  font-size: 14px;
+}
+
+.citacao footer {
+  color: var(--text-muted, #666);
+  margin-top: 4px;
+}

@@ -11,7 +11,7 @@
 | **4** | Indexação — embeddings e pgvector | ✅ escrita |
 | **5** | Recuperação — a busca | ✅ escrita |
 | **6** | Geração — prompt, resposta e citação | ✅ escrita |
-| 7 | Entrega — API, interface, testes e Docker | ⬜ pendente |
+| **7** | Entrega — API, interface, testes e Docker | ✅ escrita |
 
 ---
 
@@ -964,10 +964,138 @@ Repare no arco que se fechou: começamos na Etapa 2 com testes 100% determiníst
 
 ---
 
-## Balanço
+# Etapa 7 — Entrega
 
-A documentação do v1 está conceitualmente completa. As seis etapas do pipeline estão escritas. Sobra a Etapa 7 (entrega — API, interface, Docker, README), que não tem conceito novo de RAG: é a etapa que transforma as seis peças num projeto apresentável.
+## 7.1 O que muda de mentalidade aqui
 
-## Próxima etapa
+As seis etapas anteriores responderam "como o RAG funciona?". Esta responde outra pergunta: "como alguém que não é você usa e avalia isto?"
 
-**Etapa 7 — Entrega:** API, interface, testes de ponta a ponta e Docker Compose — as seis peças viram um projeto que se roda com um comando só.
+Isso inclui o usuário que sobe um PDF, mas inclui principalmente o recrutador que abre o repositório. Num projeto de portfólio, esse é o usuário mais importante — e ele decide em dois minutos se vale continuar lendo. A Etapa 7 é, em boa parte, engenharia para esses dois minutos.
+
+Não há conceito novo de RAG. Há o trabalho que separa "funciona na minha máquina" de "funciona, e qualquer um consegue ver funcionando".
+
+## 7.2 A API: juntar as peças numa superfície
+
+Até aqui, cada etapa é uma função. A API é o que as expõe ao mundo. Duas rotas sustentam o v1 inteiro:
+
+| Método | Rota | O que faz | Etapas que aciona |
+|---|---|---|---|
+| POST | `/documentos` | Recebe o PDF, roda a indexação, responde quando está pronto | 2, 3, 4 |
+| POST | `/perguntas` | Recebe a pergunta, roda a consulta, devolve resposta + citações | 5, 6 |
+
+Repare que as rotas são o corte entre as duas fases, agora visível de fora: `/documentos` é a fase de indexação inteira atrás de um endpoint; `/perguntas` é a fase de consulta inteira atrás de outro. A fronteira que escorregou tantas vezes na leitura virou, no fim, a divisão mais natural da API.
+
+Complementos úteis, sem exagero:
+
+- `GET /health` — responde "estou de pé". Trivial, e é o primeiro sinal de profissionalismo que um avaliador procura.
+- `GET /documentos/{id}` — estado do documento (indexando / pronto / falhou), que a próxima seção justifica.
+
+O `main.py` continua fino: recebe, valida com Pydantic, delega para a função da etapa certa, devolve. Nenhuma lógica de RAG mora na camada de rota — ela só traduz HTTP em chamada de função e volta. Isso é a fronteira borda/núcleo, agora no topo da pilha.
+
+## 7.3 A indexação demora: a decisão do síncrono
+
+Aqui aparece o primeiro problema real que só a entrega revela.
+
+Indexar um PDF de 300 páginas — extrair, picotar, gerar centenas de embeddings — leva segundos, às vezes minutos. Se `POST /documentos` fizer tudo isso antes de responder, a requisição fica pendurada o tempo todo, e um PDF grande estoura o tempo limite do navegador.
+
+A solução completa é processar em segundo plano: a rota responde na hora com "recebido, estou processando", e o trabalho pesado roda numa fila. É o padrão de produção — e é exatamente a arquitetura do projeto de monitoramento de preços que foi cogitado lá no começo (fila de tarefas, Celery/ARQ, Redis).
+
+**Decisão do v1:** processamento síncrono, com limite de tamanho honesto. A rota indexa e só então responde; o teto de 20 MB da Etapa 2 mantém o tempo dentro do aceitável. A fila fica no roadmap.
+
+O motivo é disciplina de escopo, a mesma do projeto todo: fila assíncrona é uma peça de infraestrutura inteira (broker, worker, monitoramento de job) que não ensina nada sobre RAG e adiciona muita superfície. Fazê-la aqui inflaria o escopo de novo — o erro que quase afundou o projeto no início. Declarar no README "indexação síncrona no v1; fila assíncrona no roadmap" demonstra que você conhece o padrão de produção e escolheu não implementá-lo agora — o que vale mais do que uma fila mal feita.
+
+## 7.4 A interface: só o que prova o produto
+
+A interface do v1 tem uma responsabilidade única: deixar a demo acontecer em dez segundos. Nada além disso.
+
+O mínimo que prova tudo:
+
+- uma área para subir o PDF
+- um campo de pergunta
+- a resposta
+- as citações ao lado da resposta — o trecho e a página
+
+A citação não é opcional na interface, pelo motivo da Etapa 6: é ela que transforma "a IA afirmou algo" em "a IA afirmou, e aqui está a prova, confira você mesmo". Uma demo de RAG sem citação visível parece um chatbot qualquer; com citação, parece a ferramenta que é. Se houver um único capricho de frontend, é este.
+
+O que não entra: login, histórico de conversas, gerenciamento de múltiplos documentos, tema escuro. Tudo isso é polimento que não demonstra RAG. A interface serve ao núcleo, não o contrário.
+
+## 7.5 Testes de ponta a ponta
+
+Cada etapa já tem seus testes. Falta o teste que atravessa o pipeline inteiro — o que dá confiança de que as seis peças, juntas, funcionam:
+
+Suba um PDF conhecido, faça uma pergunta cuja resposta você sabe, verifique que a resposta bate e que a citação aponta a página certa.
+
+Esse teste é o que, sozinho, prova que o projeto funciona. Ele é mais lento (roda tudo) e, por incluir a LLM, tem o componente não-determinístico da Etapa 6 — então verifique propriedades, não a string exata: que a resposta menciona o fato esperado, que veio citação, que a página é a correta. A recuperação e a montagem do prompt, essas, são determinísticas e você verifica com precisão.
+
+Um segundo teste de ponta a ponta fecha o par, e é o que mais impressiona: pergunte algo que não está no documento e verifique que o sistema diz que não sabe. Ele prova, de fora, que os dois freios da Etapa 5 e 6 — limiar e grounding — trabalham juntos. É o teste que demonstra que o RAG é honesto, e honestidade é o argumento de confiança do produto.
+
+## 7.6 Docker: o que faz "clona e roda"
+
+Este é o passo isolado de maior retorno da Etapa 7, e talvez do projeto.
+
+Um projeto que exige instalar Python na versão certa, subir um PostgreSQL, instalar a extensão pgvector, baixar o modelo, configurar variáveis e rezar — a maioria dos avaliadores desiste antes de ver rodar. Um projeto onde `docker compose up` levanta tudo é um projeto que funciona na frente de quem importa.
+
+O `docker-compose.yml` do v1 sobe dois serviços:
+
+- a aplicação (FastAPI + o código das sete etapas)
+- o PostgreSQL com pgvector já incluído — usando a imagem `pgvector/pgvector`, não a `postgres` pura, pela armadilha da Etapa 4
+
+Com isso, a distância entre "vi o repositório" e "estou conversando com um PDF na minha máquina" vira um comando. Num portfólio, essa distância é a diferença entre ser avaliado e ser ignorado.
+
+O que vai no `.env.example` (nunca no `.env` versionado, pela Etapa 2): a string do banco, a chave da API de LLM, o nome do modelo de embedding. Um README que diz "copie `.env.example` para `.env`, ponha sua chave, rode `docker compose up`" é um README que respeita o tempo de quem lê.
+
+**Nota de implementação:** a Etapa 6 foi revista para usar LLM local via Ollama, não API paga (ver correção na seção 6.7) — não há chave de LLM no `.env.example` por esse motivo. O Ollama roda no host, fora do `docker-compose.yml`: é um runtime pesado (modelo de alguns GB) que faz mais sentido como pré-requisito instalado uma vez do que como terceiro serviço reconstruído a cada `docker compose up`. O serviço `app` alcança-o via `host.docker.internal`. Os dois serviços que a seção pede — aplicação e banco — continuam sendo exatamente dois.
+
+## 7.7 O README: o verdadeiro ponto de entrada
+
+Dito sem rodeio: mais gente vai ler seu README do que rodar seu código. Ele não é documentação acessória — é a interface primária do projeto para o mercado.
+
+O que um bom README de portfólio tem, em ordem:
+
+1. **Uma frase que diz o que é** — "converse com um PDF; respostas com a fonte e a página". Sem jargão.
+2. **Um GIF ou print da demo** — a coisa funcionando, antes de qualquer texto. É o que segura o leitor.
+3. **Como rodar** — os três comandos do Docker. Se exigir mais que isso, encurte.
+4. **As decisões de arquitetura, com o porquê** — pgvector em vez de Pinecone, sem LangChain, busca simples antes da híbrida. Esta é a seção que um avaliador técnico lê, e é onde todo o entendimento que você construiu nas seis etapas vira evidência. As decisões que você sabe defender aqui são as mesmas que você vai defender na entrevista.
+5. **Limitações conhecidas e roadmap** — declarar o que não faz e o que viria depois. Sinal de maturidade, não de fraqueza.
+
+A documentação por etapas (este documento) vive ao lado, em `docs/`, para quem quiser o mergulho fundo. O README é a porta; a documentação é a casa.
+
+## 7.8 O arco fechado
+
+Vale olhar para trás uma vez, porque o projeto conta uma história coerente quando visto inteiro:
+
+| Etapa | O que ficou | Onde reaparece |
+|---|---|---|
+| 1 | O escopo enxuto que salvou o projeto | Todo "fica no roadmap" veio daqui |
+| 2 | Extrair página por página | Virou a citação da Etapa 6 |
+| 3 | O chunk como unidade tripla | Definiu busca, contexto e citação |
+| 4 | O mapa de significados | A busca inteira é distância nesse mapa |
+| 5 | Recuperar não é gerar; o limiar | O teto de qualidade da resposta |
+| 6 | Gerar preso ao contexto; "não sei" | A confiança do produto |
+| 7 | Empacotar para quem avalia | O que torna tudo acima visível |
+
+Cada decisão de escopo — o que ficou de fora — não foi corte por incapacidade, foi corte por foco. E o roadmap que se acumulou (busca híbrida, reranking, evals, fila assíncrona, DOCX, streaming, OCR, multiusuário, anonimização via SecureFlow) não é uma lista de dívidas: é a prova de que você conhece o caminho de produção inteiro e escolheu, conscientemente, onde parar a v1.
+
+Essa é a diferença entre um projeto de estudante e um projeto de engenheiro: não é fazer tudo. É saber o que fazer primeiro, fazer isso completo, e conseguir explicar cada coisa que ficou para depois.
+
+## 7.9 Glossário desta etapa
+
+| Termo | O que é |
+|---|---|
+| **Endpoint** | Uma rota da API — um endereço que aceita requisições (ex.: `POST /perguntas`) |
+| **Síncrono** | A rota faz todo o trabalho antes de responder. Simples, mas prende a requisição |
+| **Assíncrono / fila** | O trabalho pesado roda em segundo plano; a rota responde na hora. Roadmap |
+| **Health check** | Rota que confirma que o serviço está no ar |
+| **Teste de ponta a ponta (E2E)** | Teste que exercita o pipeline inteiro, do upload à resposta |
+| **docker-compose** | Arquivo que sobe vários serviços (app + banco) com um comando |
+| **README** | O documento de entrada do repositório. A interface do projeto para quem avalia |
+
+---
+
+## Fim da documentação do v1
+
+As sete etapas estão escritas. O pipeline foi construído. O que existe ao final:
+
+> Um serviço que recebe um PDF, permite perguntar sobre ele em linguagem natural, e responde com base no conteúdo — citando a página — ou admite quando a resposta não está lá. Empacotado em Docker, testado de ponta a ponta, documentado decisão por decisão.
+
+O roadmap — busca híbrida, reranking, evals, fila assíncrona, DOCX, streaming, OCR, multiusuário e a anonimização via SecureFlow — fica declarado no README como o caminho da v2 em diante. Não como dívida: como mapa.

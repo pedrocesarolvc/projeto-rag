@@ -7,6 +7,11 @@ significado (não por palavra igual), monta um prompt com os trechos relevantes,
 citando o trecho e a página que fundamentaram a resposta. Nada é treinado: o conhecimento vive no
 banco de dados, não no modelo.
 
+**O sistema admite quando não sabe.** Se a pergunta não tem resposta no documento, a instrução no
+prompt (grounding) manda dizer isso em vez de inventar — "não encontrei isso no documento" é uma
+resposta correta, não uma falha. É a característica que diferencia um RAG confiável de um gerador
+de plausibilidades (ver `docs/documentacao.md`, Etapa 6, seção 6.5).
+
 Documentação completa, por etapas: `docs/documentacao.md`.
 
 ## Stack
@@ -18,6 +23,7 @@ Documentação completa, por etapas: `docs/documentacao.md`.
 | Validação | Pydantic |
 | Extração de PDF | PyMuPDF |
 | Embeddings | sentence-transformers (local, multilíngue) |
+| LLM (geração) | Ollama, local (Llama 3.1 8B) |
 | Banco | PostgreSQL + pgvector |
 | Frontend | TypeScript + React |
 | Testes | pytest |
@@ -38,8 +44,12 @@ app/
 ├── indexacao/                # Etapa 4
 │   ├── embedder.py            # texto → vetor (modelo local)
 │   └── armazenador.py         # grava chunks + vetores no PostgreSQL
-└── recuperacao/               # Etapa 5
-    └── buscador.py             # pergunta → chunks mais relevantes
+├── recuperacao/               # Etapa 5
+│   └── buscador.py             # pergunta → chunks mais relevantes
+└── geracao/                   # Etapa 6
+    ├── prompt.py                # instrução + contexto + pergunta
+    ├── llm.py                   # chamada isolada ao modelo local (gerar(prompt) -> texto)
+    └── responder.py             # monta prompt + chama a LLM
 tests/
 ├── fixtures/                # PDFs de teste
 ├── conftest.py              # fixtures compartilhadas (Postgres real)
@@ -47,7 +57,10 @@ tests/
 ├── test_chunking.py
 ├── test_embedder.py
 ├── test_armazenador.py
-└── test_buscador.py
+├── test_buscador.py
+├── test_buscador_unitario.py
+├── test_prompt.py
+└── test_responder.py
 ```
 
 ## Limitações conhecidas
@@ -66,8 +79,12 @@ tests/
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env   # e ajuste DATABASE_URL
+cp .env.example .env   # ajuste DATABASE_URL
+
+# instale o Ollama (https://ollama.com) e baixe o modelo de geração:
+ollama pull llama3.1:8b
+
 pytest tests/
 ```
 
-O primeiro `pytest` baixa o modelo de embedding (~1 GB, uma vez só — fica em cache local). Os testes de `test_armazenador.py` só rodam se `DATABASE_URL` apontar para um Postgres com a extensão `vector` já instalada; caso contrário, pulam automaticamente.
+O primeiro `pytest` baixa o modelo de embedding (~1 GB, uma vez só — fica em cache local). Os testes de `test_armazenador.py` e `test_buscador.py` só rodam se `DATABASE_URL` apontar para um Postgres com a extensão `vector` já instalada; caso contrário, pulam automaticamente. Nenhum teste chama o Ollama de verdade — `llm.gerar()` é sempre substituído por um dublê (mock) nos testes — então o Ollama só precisa estar rodando para usar a aplicação de verdade, não para testar.

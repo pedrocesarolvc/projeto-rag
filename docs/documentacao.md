@@ -10,7 +10,7 @@
 | **3** | Chunking — divisão do texto | ✅ escrita |
 | **4** | Indexação — embeddings e pgvector | ✅ escrita |
 | **5** | Recuperação — a busca | ✅ escrita |
-| 6 | Geração — prompt, resposta e citação | ⬜ pendente |
+| **6** | Geração — prompt, resposta e citação | ✅ escrita |
 | 7 | Entrega — API, interface, testes e Docker | ⬜ pendente |
 
 ---
@@ -801,6 +801,173 @@ Esse último é raro e valioso: um teste que afirma uma limitação conhecida. E
 
 ---
 
+# Etapa 6 — Geração
+
+## 6.1 Onde estamos
+
+A pergunta chegou (Etapa 5), virou vetor, e a busca devolveu um punhado de chunks — texto e página de cada um, os que sobreviveram ao limiar. Agora esses trechos viram resposta.
+
+Esta é a segunda metade da fase de consulta, e a última do pipeline. É também, enfim, a etapa em que a LLM aparece para fazer o que ela faz de melhor: escrever.
+
+Vale reancorar a fronteira uma última vez, porque ela é a espinha do projeto:
+
+- **Recuperação (Etapa 5):** acha os trechos. Não escreve.
+- **Geração (Etapa 6):** escreve a resposta. Não busca.
+
+A geração confia inteiramente no que a recuperação entregou. Ela não vai atrás de mais nada — trabalha só com os chunks que recebeu. É por isso que a Etapa 5 decide o teto de qualidade da resposta: a geração não conserta uma recuperação ruim, ela só redige em cima do que veio. A seção 5.8 dita, aqui é onde a consequência dela se realiza.
+
+## 6.2 O que esta etapa faz
+
+**Entra:** a pergunta do usuário e os chunks recuperados (texto + página).
+**Sai:** uma resposta em texto, ancorada nesses chunks, com a indicação de onde cada parte saiu.
+
+O "G" de RAG mora aqui — *Generation*. Mas é uma geração presa à coleira: o modelo não responde do que sabe, responde do que recebeu. Transformar uma LLM que sabe de tudo num modelo que só fala do documento é o trabalho central da etapa, e ele é feito com uma coisa só — o prompt.
+
+## 6.3 O prompt é a lógica de negócio
+
+Lembra que, lá na discussão das camadas, ficou dito que este projeto tem pouca lógica de negócio — e que a que existe mora no prompt? É aqui. Este é o ponto do projeto inteiro onde uma regra de negócio é escrita, literalmente, em português.
+
+O prompt de RAG tem três partes, montadas a cada pergunta:
+
+```
+┌─────────────────────────────────────────────┐
+│ INSTRUÇÃO                                   │
+│ "Responda usando somente o contexto abaixo. │
+│  Se a resposta não estiver nele, diga que   │
+│  não encontrou. Indique a página."          │
+├─────────────────────────────────────────────┤
+│ CONTEXTO                                     │
+│ [chunk 1 — pág. 3]  ...texto...              │
+│ [chunk 2 — pág. 7]  ...texto...              │
+│  (os top-k que a Etapa 5 entregou)          │
+├─────────────────────────────────────────────┤
+│ PERGUNTA                                     │
+│ "qual é o prazo de rescisão?"               │
+└─────────────────────────────────────────────┘
+```
+
+Instrução, contexto, pergunta. É este bloco inteiro que vai para a LLM — não a pergunta sozinha, nunca a pergunta sozinha. A pergunta sem o contexto é só uma pergunta a um modelo que não conhece o seu documento; o RAG está exatamente em juntar os dois. A palavra "Augmented" do nome é este momento: a pergunta aumentada com os trechos recuperados.
+
+## 6.4 Grounding: prender o modelo ao contexto
+
+A instrução do topo tem um nome técnico — *grounding* (ancoragem). É o que obriga a resposta a se sustentar no contexto, e não no que o modelo "acha que sabe".
+
+Sem grounding, a LLM faz o que ela sempre faz: completa com o conhecimento geral dela. Aí some a razão do RAG existir. Se o modelo fosse responder do próprio treino, você não precisava de documento nenhum — e a resposta viria com a confiança de sempre, esteja certa ou não.
+
+A instrução de grounding faz três exigências ao modelo:
+
+**Use apenas o contexto.** Não complemente com conhecimento externo, mesmo que você "saiba" a resposta.
+
+**Admita quando não está lá.** Se o contexto não contém a resposta, diga isso — não invente.
+
+**Aponte a origem.** Indique de qual trecho ou página cada afirmação veio.
+
+As três são regras de negócio. Nenhuma é código no sentido tradicional — são frases em português que definem o comportamento do produto. Trocar essas frases muda o que o sistema é, tanto quanto trocar uma função mudaria.
+
+## 6.5 "Não sei" é uma resposta certa
+
+Este é o ponto que separa um RAG confiável de um gerador de plausibilidades — e ele conecta direto com o limiar da Etapa 5.
+
+Uma LLM, por padrão, detesta dizer que não sabe. Ela foi treinada para ser prestativa, e o caminho de menor resistência é sempre produzir algo. Peça o que não está no contexto e, sem instrução em contrário, ela preenche a lacuna com uma invenção fluente e convincente. Isso é alucinação, e num sistema que promete responder sobre documentos reais, é o pior defeito possível.
+
+Dois freios trabalham juntos, um em cada etapa:
+
+- O limiar da Etapa 5 evita que lixo chegue como contexto. Se nada passou de perto, a Etapa 6 recebe contexto vazio.
+- O grounding da Etapa 6 instrui o modelo a dizer "não encontrei no documento" quando o contexto não contém a resposta — inclusive quando ele chega vazio.
+
+Um RAG que responde "isso não está no documento" está funcionando corretamente. Parece um fracasso — o usuário não recebeu o que queria — mas é o oposto: é o sistema recusando-se a inventar. A alternativa, uma resposta bonita e falsa, é o único resultado verdadeiramente inaceitável, porque o usuário não tem como distinguir a mentira sem ir conferir no documento — e se ele vai conferir de qualquer jeito, o RAG não serviu para nada.
+
+Vale escrever isso no README como característica, não como limitação: o sistema admite quando não sabe. É um argumento de confiança.
+
+## 6.6 A citação fecha o ciclo
+
+A citação — mostrar o trecho e a página que fundamentaram a resposta — foi decidida como parte do v1 lá na Etapa 1, e não como enfeite. Agora dá para ver por quê.
+
+A resposta de uma LLM sempre parece confiante. O texto tem a mesma cara segura quando está certo e quando alucina. A citação é o que devolve ao usuário o poder de verificar. Com o trecho e a página na tela, ele confere em dois segundos se a resposta bate com a fonte. Sem isso, ele teria que reler o documento inteiro — e aí o RAG não economizou nada.
+
+E repare no caminho que a página percorreu para chegar aqui:
+
+extraída na Etapa 2 (PyMuPDF, página a página) → preservada no chunk na Etapa 3 (o chunk não atravessa página, justamente para isto) → gravada na coluna `pagina` na Etapa 4 → carregada pela busca na Etapa 5 → exibida na citação na Etapa 6.
+
+Cinco etapas atrás, decidir extrair "página por página" parecia um detalhe técnico da ingestão. Era, na verdade, a primeira metade desta citação. É por isso que a decisão da Etapa 2 e a feature da Etapa 6 são a mesma coisa, tomada em dois momentos — algo que a Etapa 2 já prenunciava e que só agora se completa.
+
+Como conseguir a citação, na prática: peça no prompt que o modelo referencie a página de cada afirmação, já que cada chunk entra no contexto rotulado com a sua (`[pág. 3]`). No v1 basta isso, mais exibir na interface os chunks que a Etapa 5 recuperou, ao lado da resposta. O usuário lê a resposta e vê, do lado, os trechos originais com a página. Ciclo de confiança fechado.
+
+## 6.7 A LLM: local ou API
+
+Como no embedding, duas rotas — e a decisão é independente da que você tomou lá, porque são dois modelos diferentes (o de embedding vetoriza, este redige).
+
+| | Via API (OpenAI, Anthropic, etc.) | Local (Llama, Mistral, etc.) |
+|---|---|---|
+| Qualidade da redação | Alta, consistente | Boa, variável conforme o modelo e a máquina |
+| Custo | Por uso | Grátis após baixar |
+| Privacidade | O contexto sai da máquina | Nada sai |
+| Setup | Uma chave de API | Pesado: precisa de máquina com folga |
+
+**Decisão do v1:** uma abstração fina que permita os dois, começando pela API. A geração exige mais do modelo do que o embedding, e um modelo local de qualidade pede hardware que nem todo mundo tem. Começar pela API tira o gargalo de máquina do caminho e deixa você focar no que a etapa ensina — o prompt.
+
+Mas isole a chamada atrás de uma função só (`gerar(prompt) -> texto`), sem espalhar o cliente da API pelo código. Assim, trocar para um modelo local depois — ou trocar de provedor — mexe em um arquivo, não em dez. Essa é a mesma ideia de "borda vs. núcleo" da discussão de camadas: o provedor de LLM é borda, substituível; o pipeline de RAG é núcleo, e não deveria nem saber qual modelo respondeu.
+
+(Nota de privacidade, ponte com o outro projeto do portfólio: usar API significa que o contexto — trechos do documento — sai da sua máquina para um terceiro. Se o documento tiver dado pessoal, isso é exatamente o problema que o SecureFlow resolve, anonimizando antes do envio. É a integração possível que ficou no roadmap dos dois — mencionada aqui porque a Etapa 6 é o ponto exato onde ela se encaixaria.)
+
+**Correção, feita na implementação:** o v1 acima escolhe começar pela API. Na prática, o projeto trocou para a rota local (Ollama) logo de saída — para não exigir chave de API nem cartão de crédito de quem clona o projeto para avaliar. É a mesma tabela desta seção, só que pesando "setup" (que o Ollama simplifica bastante — um instalador, um `ollama pull`) mais do que "qualidade de redação consistente", dado o contexto de portfólio. A abstração (`gerar(prompt) -> texto`) é exatamente o que tornou essa troca barata: só `app/geracao/llm.py` mudou.
+
+Dentro da rota local, testei dois tamanhos com o mesmo cenário (o exemplo do sinônimo distrato/rescisão da Etapa 1): `llama3.2:3b` e `llama3.1:8b`. Achado que vale registrar — nenhum dos dois faz a ponte "distrato" → "rescisão" sozinho; os dois preferem responder "não encontrou" a inferir uma equivalência que o texto não afirma literalmente. Isso não é falta de tamanho de modelo — é o grounding da seção 6.4 sendo conservador, e é defensável (um leitor rigoroso também distinguiria "prazo de aviso" de "prazo de rescisão"). O que o 8B faz melhor é o básico: extrai o valor certo em perguntas diretas e cita a página sozinho, sem que o prompt precise insistir. Ficou como escolha do projeto — mais lento e mais pesado em disco, mas mais preciso onde precisão importa mais.
+
+## 6.8 Streaming: por que fica no roadmap
+
+Você já viu o ChatGPT "digitar" a resposta palavra por palavra. Isso é streaming — a resposta aparece token a token conforme é gerada, em vez de surgir pronta depois de uma espera.
+
+É uma melhoria de experiência, não de arquitetura. A resposta é idêntica; só a forma de entregar muda. Como não ensina nada sobre RAG e adiciona complexidade (SSE, streaming no frontend), fica no roadmap. O v1 espera a resposta ficar pronta e a mostra de uma vez. Funciona; só é menos vistoso.
+
+## 6.9 O que pode dar errado aqui
+
+Vale separar as falhas que nascem nesta etapa das que só aparecem nela mas vêm de trás:
+
+| Sintoma | Origem real | Onde corrigir |
+|---|---|---|
+| Resposta inventa fato que não está no doc | Grounding fraco no prompt | Etapa 6 — reforçar a instrução |
+| Resposta ignora um trecho que tinha a informação | O trecho não foi recuperado | Etapa 5 — não é aqui |
+| Modelo responde do conhecimento geral dele | Falta instrução de usar só o contexto | Etapa 6 — grounding |
+| Resposta certa, mas sem citar página | Prompt não pediu a origem | Etapa 6 — pedir referência |
+| "Não sei" para algo que estava no documento | Recuperação falhou, ou limiar apertado demais | Etapa 5 — não é aqui |
+
+Metade dos sintomas que parecem da geração são, na verdade, da recuperação — exatamente o que a seção 5.8 avisou. Antes de reescrever o prompt pela décima vez, imprima o contexto que chegou. Se o trecho certo não está nele, nenhum prompt salva. Este é o hábito de depuração mais valioso do projeto inteiro, e é a razão de recuperação e geração serem etapas separadas.
+
+## 6.10 Como testar
+
+Aqui a testabilidade chega ao seu ponto mais escorregadio, e é honesto admitir por quê: a saída da LLM não é determinística. A mesma pergunta pode gerar redações diferentes. Some qualquer teste do tipo "a resposta é exatamente esta string".
+
+O que ainda dá para testar de forma confiável são os arredores da geração, que são determinísticos:
+
+- O prompt é montado com as três partes na ordem certa (instrução, contexto, pergunta) — testável, é construção de string
+- Todos os chunks recuperados entram no contexto, cada um com a sua página — testável
+- Contexto vazio (nada passou do limiar) produz um prompt que instrui o "não sei" — testável
+- A função de LLM é chamada uma vez, com o prompt montado — testável com um dublê no lugar da API real
+
+E o comportamento do modelo em si — grounding, "não sei", fidelidade ao contexto — testa-se com um conjunto de perguntas de avaliação: perguntas cuja resposta você conhece, rodadas contra um documento conhecido, conferindo se a resposta bate e se o "não sei" dispara quando deve. Isso tem nome, e é o roadmap reaparecendo pela última vez: evals. No v1, um punhado dessas perguntas conferidas à mão já basta; a suíte formal de evals é o item do v2 que transforma "parece que melhorou" em "melhorou, medido".
+
+Repare no arco que se fechou: começamos na Etapa 2 com testes 100% determinísticos (mesma entrada, mesma saída), e terminamos aqui, onde o núcleo só se avalia por amostragem. Não é o projeto ficando desleixado — é a natureza do que se testa mudando, de código para comportamento. Saber o que dá para garantir com teste e o que só dá para medir por evals é, em si, entendimento de engenharia de IA.
+
+## 6.11 Glossário desta etapa
+
+| Termo | O que é |
+|---|---|
+| **Geração (generation)** | A LLM produzindo a resposta a partir do contexto recuperado |
+| **Grounding (ancoragem)** | Prender a resposta ao contexto fornecido, proibindo conhecimento externo |
+| **Prompt** | O bloco instrução + contexto + pergunta enviado à LLM a cada consulta |
+| **Alucinação** | Resposta fluente e confiante que não se sustenta no contexto (ou é falsa) |
+| **Citação** | Exibir o trecho e a página que fundamentaram a resposta. O mecanismo de verificação |
+| **Streaming / SSE** | Entregar a resposta token a token, em tempo real. Melhoria de experiência, no roadmap |
+| **Evals** | Conjunto de perguntas de avaliação que medem a qualidade das respostas de forma reproduzível |
+| **Dublê de teste (mock)** | Substituto da API real nos testes, para não depender de rede nem gastar chamadas |
+
+---
+
+## Balanço
+
+A documentação do v1 está conceitualmente completa. As seis etapas do pipeline estão escritas. Sobra a Etapa 7 (entrega — API, interface, Docker, README), que não tem conceito novo de RAG: é a etapa que transforma as seis peças num projeto apresentável.
+
 ## Próxima etapa
 
-**Etapa 6 — Geração:** os chunks recuperados viram prompt, o prompt vira resposta, e a resposta vem com a citação que fundamenta cada palavra dela.
+**Etapa 7 — Entrega:** API, interface, testes de ponta a ponta e Docker Compose — as seis peças viram um projeto que se roda com um comando só.

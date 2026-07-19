@@ -22,5 +22,8 @@ sentence-transformers
 psycopg[binary]
 pgvector
 
+# LLM local via Ollama — Etapa 6 (app/geracao/llm.py)
+ollama
+
 # Testes
 pytest

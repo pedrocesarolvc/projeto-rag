@@ -2,9 +2,9 @@
 Configuração da aplicação via variável de ambiente.
 
 Centraliza tudo que muda entre ambientes (string de conexão do
-Postgres, chaves de API de embedding/LLM, limites de upload etc.)
-para que nenhum outro módulo leia variáveis de ambiente diretamente —
-config.py é o único ponto de acesso.
+Postgres, limites de upload etc.) para que nenhum outro módulo leia
+variáveis de ambiente diretamente — config.py é o único ponto de
+acesso.
 
 As variáveis concretas nascem junto com a etapa que passa a
 depender delas (ex.: DATABASE_URL só é necessária a partir da Etapa 4,
@@ -22,3 +22,7 @@ load_dotenv()
 # erro aparece, com uma mensagem clara em vez de um KeyError na
 # importação de todo o projeto.
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+# A LLM que gera a resposta (Etapa 6) roda local via Ollama, assim
+# como o modelo de embedding (Etapa 4) — nenhuma das duas precisa de
+# chave de API (seção 6.7 da documentação, decisão revista).

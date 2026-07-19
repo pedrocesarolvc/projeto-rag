@@ -9,7 +9,7 @@
 | **2** | Ingestão — upload e extração de texto | ✅ escrita |
 | **3** | Chunking — divisão do texto | ✅ escrita |
 | **4** | Indexação — embeddings e pgvector | ✅ escrita |
-| 5 | Recuperação — a busca | ⬜ pendente |
+| **5** | Recuperação — a busca | ✅ escrita |
 | 6 | Geração — prompt, resposta e citação | ⬜ pendente |
 | 7 | Entrega — API, interface, testes e Docker | ⬜ pendente |
 
@@ -625,6 +625,182 @@ Um lembrete que vem do seu próprio insight: a dimensão da coluna (`vector(768)
 
 ---
 
+# Etapa 5 — Recuperação
+
+## 5.1 A virada: começa a fase de consulta
+
+As quatro etapas anteriores foram todas a mesma fase — indexação. Prepararam o documento e pararam. O banco tem um mapa de pontos, imóvel, esperando.
+
+Esta etapa é outra fase. Aqui alguém pergunta.
+
+A diferença não é decorativa. A indexação roda uma vez por documento, offline, sem pressa. A consulta roda a cada pergunta, com o usuário esperando a resposta na tela. O que antes podia levar um minuto agora precisa levar frações de segundo.
+
+Guarde a fronteira, porque ela é o resumo de todo o RAG:
+
+- **Indexação (Etapas 2–4):** prepara o documento. Uma vez. Sem pergunta.
+- **Consulta (Etapas 5–6):** responde à pergunta. Toda vez. Sem tocar no documento.
+
+A Etapa 5 é a primeira metade da consulta: pegar a pergunta e achar os trechos certos. A Etapa 6 é a segunda: transformar esses trechos em resposta.
+
+## 5.2 O que esta etapa faz
+
+**Entra:** a pergunta do usuário, em texto.
+**Sai:** os poucos chunks mais relevantes para ela — o texto de cada um e a página.
+
+Nada de LLM ainda. A recuperação não gera uma palavra. Ela escolhe — separa, de milhares de chunks, o punhado que importa. A geração é a Etapa 6.
+
+Essa separação é deliberada e vale entendê-la: recuperar e gerar são problemas diferentes, com falhas diferentes. Misturá-los num passo só é o que impede de descobrir qual dos dois quebrou quando a resposta vem ruim — e, como a seção 5.8 mostra, quase sempre é a recuperação.
+
+## 5.3 Os três passos
+
+A recuperação inteira são três movimentos:
+
+```
+   pergunta em texto
+          │
+          ▼
+   1. vira vetor          ← o mesmo cartógrafo da Etapa 4
+          │
+          ▼
+   2. mede distância      ← a query pgvector: ORDER BY vetor <=> pergunta
+          │
+          ▼
+   3. pega os top-k        ← LIMIT k
+          │
+          ▼
+   os k chunks mais próximos
+```
+
+**Passo 1 — a pergunta vira ponto no mesmo mapa**
+
+A pergunta passa pelo mesmo modelo de embedding que vetorizou os chunks. Isso não é detalhe de implementação — é a condição para que a busca funcione.
+
+Volta à imagem do mapa: os chunks foram posicionados pelo cartógrafo da Etapa 4. Se a pergunta for posicionada por um cartógrafo diferente, ela cai num mapa diferente, e medir distância entre os dois é comparar "rua tal em São Paulo" com "rua tal no Rio" — mesmo nome, cidades distintas. Vetores de modelos diferentes não são comparáveis.
+
+Por isso o modelo de embedding é configuração fixa do projeto, e trocá-lo obriga a reindexar tudo. A regra da seção 4.5 reaparece aqui como a razão de a busca dar certo.
+
+**Passo 2 — mede a distância**
+
+Agora, sim, as distâncias são calculadas — o que não aconteceu na Etapa 4. O ponto da pergunta contra cada ponto de chunk, pela query que a seção 4.7 já mostrou:
+
+```sql
+SELECT indice, pagina, texto
+FROM chunks
+WHERE documento_id = :doc
+ORDER BY vetor <=> :vetor_da_pergunta
+LIMIT :k;
+```
+
+O `<=>` é a distância de cosseno. O `ORDER BY` ordena do mais próximo ao mais distante. É literalmente a busca semântica — sem mistério, sem IA nesta linha, só geometria em SQL.
+
+**Passo 3 — pega os top-k**
+
+O `LIMIT k` corta nos k primeiros. Esse k é a primeira decisão de verdade da etapa, e a próxima seção é só sobre ele.
+
+## 5.4 O top-k: quantos trechos recuperar
+
+k é quantos chunks você entrega para a Etapa 6 usar como contexto.
+
+| k pequeno (ex.: 2) | k grande (ex.: 20) |
+|---|---|
+| Contexto enxuto e focado | Contexto amplo |
+| Risco: deixar de fora o trecho que tinha a resposta | Risco: afogar a resposta em ruído |
+| Barato em tokens na Etapa 6 | Caro, e reaparece o "perdido no meio" |
+| Se a resposta exige juntar 3 trechos, falha | Cobre respostas espalhadas |
+
+Os dois extremos falham, por motivos opostos. k pequeno amputa — a resposta estava no chunk que ficou de fora. k grande dilui — o trecho certo entrou, mas enterrado sob dez irrelevantes, e a LLM se perde (o mesmo "perdido no meio" que motivou o RAG a existir, reaparecendo em escala menor).
+
+Ponto de partida do v1: k entre 4 e 6. É um chute educado, como o tamanho do chunk foi. E qual o k ideal? Depende do documento e do tipo de pergunta — o que significa que a resposta honesta é medir, e medir recuperação é exatamente o que os evals fazem. Outra vez o roadmap aparece como "o lugar onde esse número deixa de ser chute".
+
+## 5.5 Distância não é relevância: o limiar
+
+Um erro sutil: o `LIMIT k` sempre devolve k chunks. Sempre. Mesmo que a pergunta não tenha nada a ver com o documento.
+
+Pergunte "qual a receita de lasanha?" a um contrato de aluguel. O banco não tem nada relevante — mas o `ORDER BY ... LIMIT 5` obedece e devolve os 5 chunks "menos distantes", que ainda assim estão longíssimos. Eles não respondem nada; são só os menos ruins de um monte ruim.
+
+Se você repassar isso cru para a Etapa 6, a LLM recebe cinco trechos irrelevantes e é instruída a responder com base neles — a receita para uma alucinação confiante.
+
+A defesa é um limiar de distância (*threshold*): descarte o chunk cuja distância passe de um teto. Se, depois do corte, não sobrar nenhum, a resposta honesta é "não encontrei isso no documento" — que é uma resposta correta, não uma falha. Um RAG que sabe dizer "não sei" vale mais que um que sempre inventa algo.
+
+Calibrar esse teto tem o mesmo trade-off de tudo nesta área: apertado demais rejeita trecho bom, frouxo demais deixa passar lixo. Valor de partida no v1, e ajuste com evals. (O paralelo com o SecureFlow é exato: lá era falso positivo contra falso negativo na detecção de PII; aqui é rejeitar contexto bom contra aceitar contexto ruim. O mesmo botão, outro domínio.)
+
+## 5.6 O que a busca semântica erra
+
+A busca por significado é excelente com sentido e fraca com literalidade. Ela acha "distrato" quando você pergunta "rescisão" — e erra quando você precisa do exato.
+
+Casos onde ela tropeça:
+
+**Códigos e identificadores** — "produto XPT-4471", "processo 0801234-56". O vetor de um código é quase vazio de significado; "XPT-4471" e "XPT-4472" parecem quase idênticos para o embedding, e são coisas diferentes.
+
+**Nomes próprios** — "contrato com a Silveira Advogados". Semanticamente, todo nome de escritório é parecido.
+
+**Números exatos** — "a cláusula 7.3", "o valor de R$ 4.500". O embedding capta "é um número de cláusula", não qual.
+
+**Termos raros e siglas internas** — jargão que aparece pouco no treino do modelo tem vetor mal posicionado.
+
+O padrão: quando a resposta depende do símbolo exato, e não do sentido, a busca semântica escorrega. E, ironia, é justo aí que a busca burra por palavra-chave — que só casa caractere — acerta em cheio.
+
+## 5.7 Por que não resolver isso agora: a busca híbrida
+
+A correção tem nome: busca híbrida — rodar a busca semântica e a busca por palavra-chave em paralelo e fundir os resultados. A semântica cobre o sentido; a palavra-chave cobre o literal. Onde uma é cega, a outra enxerga.
+
+E o PostgreSQL faz as duas: pgvector para a semântica, full-text search nativo (`tsvector`) para a palavra-chave. Nenhuma peça nova.
+
+Então por que fica no roadmap, e não no v1? Por disciplina de escopo — a mesma que salvou este projeto lá atrás. A busca híbrida é uma melhoria da busca semântica: precisa que a busca simples exista, funcione e esteja testada antes de ter o que aprimorar. Construir as duas de uma vez, sem a primeira firme, é misturar duas fontes de bug e não saber qual delas falhou.
+
+A ordem certa: busca simples funcionando no v1, com a limitação da 5.6 declarada no README. Busca híbrida como o primeiro item do v2 — o upgrade mais valioso e mais natural que o projeto tem. Declarar a limitação e apontar a solução no roadmap demonstra mais domínio do que esconder o problema com uma implementação apressada.
+
+## 5.8 A verdade que ordena as prioridades
+
+Guarde isto, porque é o que distingue quem já operou RAG de quem só montou um:
+
+**A maioria esmagadora das respostas ruins de um RAG nasce na recuperação, não na geração.**
+
+Se o trecho certo não entra no top-k, a Etapa 6 está condenada antes de começar — nenhuma LLM responde bem a partir do contexto errado; ela vai gerar algo plausível e incorreto. Quando a resposta vem ruim, o instinto é culpar o modelo e trocá-lo. Quase sempre o defeito está aqui: chunk mal cortado (Etapa 3), k mal escolhido, limiar mal calibrado, ou o caso literal da 5.6.
+
+A consequência prática para o seu tempo: quando algo falhar, olhe o que foi recuperado antes de mexer no prompt. Imprima os top-k. Se o trecho certo não está lá, o problema é a recuperação, e mexer no prompt é perda de tempo. É o motivo de recuperação e geração serem etapas separadas — e o motivo de os evals medirem as duas isoladamente.
+
+## 5.9 O contrato de saída
+
+A Etapa 5 entrega à 6:
+
+```python
+[
+    {"pagina": 3, "texto": "...", "distancia": 0.18},
+    {"pagina": 7, "texto": "...", "distancia": 0.24},
+]
+```
+
+A `distancia` viaja junto de propósito: alimenta o limiar da 5.5 e, na interface, permite mostrar ao usuário o quão forte foi cada correspondência. `pagina` e `texto` são o que a citação da Etapa 6 vai exibir — os mesmos campos que nasceram nas Etapas 2 e 3, atravessando o pipeline inteiro até a tela.
+
+## 5.10 Como testar
+
+A recuperação é mais testável do que parece, desde que você monte o cenário. Com um documento pequeno e conhecido indexado:
+
+- Uma pergunta cuja resposta está claramente na página X → o chunk da página X vem no top-k
+- Uma pergunta sobre assunto ausente do documento → o limiar zera o resultado (testa o "não sei")
+- k = 3 devolve no máximo 3 chunks
+- Os resultados vêm ordenados por distância crescente
+- A pergunta com sinônimo ("rescisão" quando o texto diz "distrato") recupera o trecho certo — o teste que prova a busca semântica de ponta a ponta
+- Uma pergunta por código exato ("XPT-4471") falha em recuperar — e tudo bem: documenta a limitação da 5.6 como teste, provando que você conhece a fronteira
+
+Esse último é raro e valioso: um teste que afirma uma limitação conhecida. Ele não pega bug — ele prova que a fraqueza é entendida e esperada, não uma surpresa. É a diferença entre "não sabia" e "sei, e está no roadmap".
+
+## 5.11 Glossário desta etapa
+
+| Termo | O que é |
+|---|---|
+| **Recuperação (retrieval)** | Achar, entre todos os chunks, os mais relevantes para a pergunta |
+| **Fase de consulta** | O fluxo que roda a cada pergunta. Oposto da indexação, que roda uma vez |
+| **top-k** | Os k chunks mais próximos que a busca devolve. k é você quem escolhe |
+| **Limiar (threshold)** | Distância máxima aceita. Além dela, o chunk é descartado por irrelevância |
+| **Busca semântica** | Busca por proximidade de significado (vetores). Forte no sentido, fraca no literal |
+| **Busca por palavra-chave** | Busca por casamento de termos (`tsvector`). Forte no literal, cega ao sentido |
+| **Busca híbrida** | As duas combinadas, com os rankings fundidos. Primeiro item do roadmap |
+| **"Perdido no meio"** | A tendência da LLM de ignorar informação enterrada no meio de um contexto longo |
+
+---
+
 ## Próxima etapa
 
-**Etapa 5 — Recuperação:** a busca de verdade — como a pergunta vira a mesma query `ORDER BY ... LIMIT` que fechou esta etapa, e o que fazer com os chunks que ela devolve.
+**Etapa 6 — Geração:** os chunks recuperados viram prompt, o prompt vira resposta, e a resposta vem com a citação que fundamenta cada palavra dela.

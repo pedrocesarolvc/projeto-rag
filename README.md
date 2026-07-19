@@ -35,15 +35,19 @@ app/
 │   └── extrator.py         # PDF → texto, página por página
 ├── chunking/                # Etapa 3
 │   └── divisor.py            # texto → chunks, por corte recursivo
-└── indexacao/                # Etapa 4
-    ├── embedder.py            # texto → vetor (modelo local)
-    └── armazenador.py         # grava chunks + vetores no PostgreSQL
+├── indexacao/                # Etapa 4
+│   ├── embedder.py            # texto → vetor (modelo local)
+│   └── armazenador.py         # grava chunks + vetores no PostgreSQL
+└── recuperacao/               # Etapa 5
+    └── buscador.py             # pergunta → chunks mais relevantes
 tests/
 ├── fixtures/                # PDFs de teste
+├── conftest.py              # fixtures compartilhadas (Postgres real)
 ├── test_ingestao.py
 ├── test_chunking.py
 ├── test_embedder.py
-└── test_armazenador.py
+├── test_armazenador.py
+└── test_buscador.py
 ```
 
 ## Limitações conhecidas
@@ -52,7 +56,9 @@ tests/
 |---|---|
 | Chunk nunca atravessa página | Um parágrafo que atravessa a virada de página vira dois chunks. Trocado por citação sem ambiguidade — a página de um chunk nunca é um intervalo (ver `docs/documentacao.md`, Etapa 3, seção 3.7) |
 | Tamanho do chunk (~450 caracteres) e sobreposição (~15%) são um chute educado | Ajustado para caber no teto de 128 tokens do modelo de embedding local (acima disso, o modelo trunca em silêncio — ver `docs/documentacao.md`, Etapa 4). Ainda sem evals para validar se é o tamanho ideal para este tipo de documento |
-| `tests/test_armazenador.py` pula sem Docker num Windows local | pgvector não tem binário para Windows — exigiria compilar com Visual Studio Build Tools. A imagem `pgvector/pgvector` do Docker (Etapa 7) resolve isso sem build manual |
+| `tests/test_armazenador.py` e `tests/test_buscador.py` pulam sem Docker num Windows local | pgvector não tem binário para Windows — exigiria compilar com Visual Studio Build Tools. A imagem `pgvector/pgvector` do Docker (Etapa 7) resolve isso sem build manual |
+| A busca só é semântica — erra código, nome próprio e número exato | "Produto XPT-4471" e "XPT-4472" parecem quase idênticos para o embedding, que capta sentido, não símbolo exato. A correção é busca híbrida (semântica + palavra-chave via `tsvector`, que o Postgres já tem) — primeiro item do roadmap, não do v1 (ver `docs/documentacao.md`, Etapa 5, seções 5.6–5.7) |
+| `k` (~5) e o limiar de distância (~0.65) são chutes calibrados, não medidos por evals | Calibrados com a distância real medida em pares pergunta/chunk deste modelo (sinônimo relacionado ≈ 0.52, assunto ausente ≈ 0.96) — não é às cegas, mas também não é o valor ideal comprovado. Evals estão no roadmap |
 
 ## Rodando localmente
 

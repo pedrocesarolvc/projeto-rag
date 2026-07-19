@@ -36,17 +36,8 @@ pytestmark = pytest.mark.skipif(
     reason="DATABASE_URL não configurada, Postgres inalcançável, ou extensão vector não instalada",
 )
 
-
-@pytest.fixture
-def conexao():
-    conexao = armazenador.conectar()
-    armazenador.criar_tabela(conexao)
-    conexao.execute("TRUNCATE chunks")
-    conexao.commit()
-    yield conexao
-    conexao.execute("TRUNCATE chunks")
-    conexao.commit()
-    conexao.close()
+# a fixture `conexao` vem de tests/conftest.py — compartilhada com
+# test_buscador.py (Etapa 5)
 
 
 # --- inserir e recuperar um vetor do Postgres devolve o mesmo vetor ---

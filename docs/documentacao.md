@@ -8,7 +8,7 @@
 | **1** | Visão, problema e escopo | ✅ escrita |
 | **2** | Ingestão — upload e extração de texto | ✅ escrita |
 | **3** | Chunking — divisão do texto | ✅ escrita |
-| 4 | Indexação — embeddings e pgvector | ⬜ pendente |
+| **4** | Indexação — embeddings e pgvector | ✅ escrita |
 | 5 | Recuperação — a busca | ⬜ pendente |
 | 6 | Geração — prompt, resposta e citação | ⬜ pendente |
 | 7 | Entrega — API, interface, testes e Docker | ⬜ pendente |
@@ -456,6 +456,171 @@ O teste da sobreposição é o que mais pega bug. É fácil escrever um splitter
 
 ---
 
+# Etapa 4 — Indexação
+
+## 4.1 O que esta etapa faz
+
+**Entra:** a lista de chunks da Etapa 3.
+**Sai:** os mesmos chunks, cada um agora com um vetor, gravados no PostgreSQL e prontos para busca.
+
+É o último passo da fase de indexação. Depois desta etapa, o documento está inteiramente preparado no banco — e, como você mesmo formulou, preparado para uma pergunta que talvez nunca venha.
+
+Aqui, enfim, aparece a IA. Mas não a IA que gera resposta — essa é a Etapa 6. A IA daqui faz uma coisa só, e mais estranha: transforma texto em números.
+
+## 4.2 O embedding, sem misticismo
+
+Um modelo de embedding recebe um texto e devolve uma lista de números. Sempre do mesmo tamanho — 384, 768, 1024 números, dependendo do modelo. Essa lista é o vetor.
+
+```
+"prazo de rescisão"  →  [0.021, -0.44, 0.87, ..., 0.03]
+                         └────────  768 números  ────────┘
+```
+
+O mesmo texto sempre gera o mesmo vetor. Textos diferentes geram vetores diferentes. Até aqui, poderia ser qualquer função que embaralha texto em número.
+
+A propriedade que muda tudo é uma só:
+
+**Textos com significado parecido geram vetores próximos. Textos com significado distante geram vetores distantes.**
+
+Não é sobre as palavras. É sobre o sentido. "Cão", "cachorro" e "canino" caem quase no mesmo lugar. "Distrato" e "rescisão" caem perto. "Planilha" cai longe dos três. Ninguém programou uma lista de sinônimos — a proximidade emergiu do treinamento do modelo em bilhões de frases, onde palavras que aparecem em contextos parecidos foram empurradas para posições parecidas.
+
+## 4.3 A intuição que faz assentar: o mapa
+
+Esqueça 768 dimensões — ninguém visualiza isso. Pense em duas.
+
+Imagine um mapa onde cada texto é um ponto. O modelo de embedding é o cartógrafo: ele posiciona cada texto no mapa de modo que distância = diferença de significado.
+
+- "prazo de rescisão" e "distrato em 90 dias" ficam no mesmo bairro
+- "receita de bolo" fica do outro lado da cidade
+- "cláusula de multa" fica na região vizinha à de rescisão — perto, mas não em cima
+
+Buscar, então, é geometria pura: você joga a pergunta no mapa e pega os pontos mais próximos. Sem entender nada de linguagem — só medindo distância.
+
+O vetor de verdade tem centenas de dimensões em vez de duas, o que dá ao modelo espaço para representar nuance ("prazo de rescisão" difere de "prazo de pagamento" numa dimensão, mas ambos são "prazo" em outra). A intuição do mapa, porém, se mantém inteira: perto é parecido, longe é diferente.
+
+## 4.4 Como se mede a distância
+
+Duas formas aparecem o tempo todo:
+
+**Distância euclidiana** — a distância "de régua" entre dois pontos. A que a intuição do mapa sugere.
+
+**Similaridade de cosseno** — mede o ângulo entre dois vetores, ignorando o comprimento. É a mais usada em RAG, e a razão é sutil mas importante: um chunk longo e um chunk curto sobre o mesmo assunto têm vetores de comprimentos diferentes, mas apontam para a mesma direção. O cosseno enxerga que falam do mesmo tema; a euclidiana se confunde com a diferença de tamanho.
+
+Para o v1, basta saber que o cosseno é o padrão e o porquê. O pgvector implementa as duas — a escolha é um operador na query.
+
+## 4.5 A escolha do modelo
+
+O modelo de embedding não é a LLM que responde. São dois modelos diferentes, com funções diferentes: o de embedding converte texto em vetor (Etapa 4); a LLM gera texto (Etapa 6). Confundi-los é comum e vale separar desde já.
+
+Duas rotas para gerar embeddings:
+
+| | Via API | Local (sentence-transformers) |
+|---|---|---|
+| Como funciona | Manda o texto para um serviço, recebe o vetor | Roda o modelo na sua máquina |
+| A favor | Zero setup, qualidade alta | Grátis, offline, dado não sai da máquina |
+| Contra | Custa por uso, exige rede, dado sai | Consome RAM, qualidade um pouco menor |
+
+**Decisão do v1: modelo local, multilíngue.** Um modelo da família sentence-transformers com suporte a português. Três motivos: é grátis (importa num projeto de portfólio), roda offline (a demo funciona sem internet e sem chave de API), e não manda o documento para fora — o que conversa direto com a tese do outro projeto do portfólio.
+
+**A regra inegociável:** o mesmo modelo que vetoriza os chunks tem de vetorizar a pergunta. Vetores de modelos diferentes vivem em mapas diferentes — medir distância entre eles é comparar coordenadas de duas cidades distintas. É por isso que o modelo escolhido é configuração fixa do projeto, não uma escolha por requisição. Trocar o modelo obriga a reindexar tudo.
+
+## 4.6 O número de dimensões é um compromisso
+
+Cada modelo produz vetores de um tamanho fixo. Mais dimensões capturam mais nuance, mas custam mais espaço no banco e deixam a busca mais lenta. Menos dimensões são enxutas e rápidas, com menos capacidade de distinção fina.
+
+Para o v1 isso não é uma decisão sua: você adota o tamanho que o modelo escolhido produz. Só há uma regra rígida — a coluna do banco precisa ter exatamente esse tamanho. Um modelo de 768 exige uma coluna `vector(768)`. Cravar o número errado é erro de dimensão na primeira inserção.
+
+## 4.7 O pgvector
+
+O pgvector é a extensão que ensina o PostgreSQL a guardar vetores e a medir distância entre eles. É o que dispensa um banco vetorial dedicado.
+
+Ele adiciona:
+
+**Um tipo de coluna** — `vector(768)`, uma coluna que guarda a lista de números.
+
+**Operadores de distância** — símbolos que calculam proximidade direto no SQL:
+
+| Operador | Mede |
+|---|---|
+| `<->` | Distância euclidiana |
+| `<=>` | Distância de cosseno |
+| `<#>` | Produto interno negativo |
+
+Com isso, "ache os 5 chunks mais próximos desta pergunta" é uma query comum:
+
+```sql
+SELECT indice, pagina, texto
+FROM chunks
+ORDER BY vetor <=> :vetor_da_pergunta
+LIMIT 5;
+```
+
+Esse `ORDER BY ... LIMIT 5` é a busca semântica inteira. Toda a Etapa 5 é, no fundo, essa query e o que se faz ao redor dela. A "busca" que parecia o coração misterioso do RAG é uma ordenação por distância.
+
+## 4.8 O índice: a pegadinha que todo mundo encontra
+
+A query acima, sem índice, compara a pergunta com todos os chunks, um por um. Para um PDF são milhares — tolerável. Para um acervo, milhões — lento demais.
+
+Um índice vetorial resolve, e o pgvector oferece dois: HNSW e IVFFlat. Para o v1 basta saber que o HNSW é o padrão atual (mais rápido nas buscas, um pouco mais lento para construir) e que ele existe para não varrer a tabela inteira a cada pergunta.
+
+Mas aqui está a pegadinha que quase todo projeto encontra — e vale saber antes de bater nela:
+
+O índice vetorial é **aproximado**. O "A" de HNSW é de *Approximate*. Para ganhar velocidade, ele pode não devolver o vizinho mais próximo exato — devolve algo quase sempre certo, com uma chance pequena de pular o melhor resultado.
+
+Ou seja: com índice, a busca fica rápida e ligeiramente imprecisa; sem índice, fica exata e lenta. Para um acervo grande, troca-se de bom grado um pouquinho de precisão por muita velocidade. Saber que esse trade-off existe — e que a lentidão sem índice não é bug, é a busca exata trabalhando — é exatamente o tipo de coisa que separa quem leu tutorial de quem entendeu.
+
+## 4.9 O que se grava
+
+A tabela que fecha a fase de indexação:
+
+```sql
+CREATE TABLE chunks (
+    id          BIGSERIAL PRIMARY KEY,
+    documento_id BIGINT NOT NULL,
+    indice      INT NOT NULL,       -- posição no documento (Etapa 3)
+    pagina      INT NOT NULL,       -- de onde veio (Etapa 2)
+    texto       TEXT NOT NULL,      -- o texto do chunk
+    vetor       VECTOR(768) NOT NULL -- o embedding (Etapa 4)
+);
+```
+
+Repare em como cada coluna nasceu numa etapa diferente. `pagina` na 2, `indice` e `texto` na 3, `vetor` na 4. A tabela é a fase de indexação inteira, materializada. Cada decisão anterior deixou aqui a sua marca — e a citação, lá na Etapa 6, vai ler `texto` e `pagina` destas linhas.
+
+O texto é guardado ao lado do vetor de propósito: na hora da resposta, você precisa do texto legível para mandar à LLM e para mostrar na citação. O vetor serve para achar; o texto, para usar.
+
+## 4.10 Como testar
+
+Aqui a testabilidade começa a mudar de natureza, e vale entender por quê.
+
+O embedding não é determinístico no sentido de que você não sabe prever os números — não dá para escrever "o vetor de 'contrato' deve ser [0.2, ...]". Então some o tipo de teste que a ingestão e o chunking permitiam. O que se testa aqui são propriedades e comportamentos, não valores:
+
+- O vetor gerado tem exatamente a dimensão da coluna (768) — pega erro de configuração
+- O mesmo texto gera o mesmo vetor duas vezes — confirma determinismo do modelo
+- Dois textos de sentido próximo ("cachorro" / "cão") produzem distância menor que dois distantes ("cachorro" / "planilha") — este é o teste que prova que o embedding funciona, e é lindo de ver passar
+- Inserir e recuperar um vetor do Postgres devolve o mesmo vetor — valida o pgvector
+- A query de distância devolve os chunks na ordem esperada num documento pequeno e controlado
+
+Esse terceiro teste é o mais valioso do projeto até aqui: ele verifica, em código, a afirmação central de toda a etapa — perto é parecido. Se ele passa, o conceito não é fé; é fato medido.
+
+## 4.11 Glossário desta etapa
+
+| Termo | O que é |
+|---|---|
+| **Embedding** | A representação de um texto como vetor de números fixos |
+| **Modelo de embedding** | O modelo que converte texto em vetor. Não é a LLM que responde |
+| **Vetor** | A lista de números. Uma posição num mapa de significados |
+| **Espaço vetorial** | O "mapa" onde os textos são pontos e a distância mede diferença de sentido |
+| **Dimensão** | Quantos números o vetor tem (384, 768, 1024...). Fixo por modelo |
+| **Similaridade de cosseno** | Distância pelo ângulo entre vetores, ignorando o comprimento. Padrão em RAG |
+| **pgvector** | Extensão que dá ao PostgreSQL o tipo vetor e os operadores de distância |
+| **HNSW / IVFFlat** | Índices vetoriais. Trocam um pouco de precisão por muita velocidade |
+| **Busca aproximada (ANN)** | *Approximate Nearest Neighbor* — acha vizinhos quase sempre certos, muito mais rápido |
+| **Reindexar** | Gerar os vetores de novo. Necessário se o modelo ou o chunking mudarem |
+
+Um lembrete que vem do seu próprio insight: a dimensão da coluna (`vector(768)` ou o que o seu modelo produzir) tem que bater exata com o que o modelo gera. Erro de dimensão estoura na primeira inserção, e a mensagem do Postgres nem sempre é óbvia — se der um erro estranho ao inserir vetor, olhe a dimensão primeiro.
+
+---
+
 ## Próxima etapa
 
-**Etapa 4 — Indexação:** como o texto vira vetor, o que é um embedding de verdade, e como o pgvector guarda e busca por proximidade.
+**Etapa 5 — Recuperação:** a busca de verdade — como a pergunta vira a mesma query `ORDER BY ... LIMIT` que fechou esta etapa, e o que fazer com os chunks que ela devolve.

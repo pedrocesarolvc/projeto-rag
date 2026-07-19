@@ -15,7 +15,10 @@ python-dotenv
 # Extração de PDF — Etapa 2 (app/ingestao/extrator.py)
 pymupdf
 
-# Banco de dados: PostgreSQL + pgvector — Etapa 3 (armazenamento)
+# Modelo de embedding local — Etapa 4 (app/indexacao/embedder.py)
+sentence-transformers
+
+# Banco de dados: PostgreSQL + pgvector — Etapa 4 (armazenamento)
 psycopg[binary]
 pgvector
 

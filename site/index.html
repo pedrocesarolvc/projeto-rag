@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projeto RAG — Converse com um PDF</title>
+<meta name="description" content="RAG local: pergunte a um PDF e receba respostas fundamentadas, com a página de origem citada. Postgres+pgvector, embeddings e LLM 100% locais.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%84%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #12141a;
+    --ink-raised: #191c24;
+    --ink-line: #2a2e38;
+    --paper: #e9e6de;
+    --paper-dim: #9ba0ad;
+    --mark: #f2b705;
+    --mark-dim: #7a6420;
+    --ok: #6fbf8b;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    line-height: 1.6;
+  }
+
+  ::selection { background: var(--mark); color: var(--ink); }
+
+  a { color: var(--mark); text-decoration-color: var(--mark-dim); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--mark); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--mark); outline-offset: 3px; }
+
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  header.hero {
+    padding: 88px 0 56px;
+    border-bottom: 1px solid var(--ink-line);
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--mark);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 8px; height: 8px;
+    background: var(--mark);
+    display: inline-block;
+    border-radius: 1px;
+  }
+
+  h1 {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(2.2rem, 5vw, 3.2rem);
+    line-height: 1.08;
+    margin: 0 0 20px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  h1 mark {
+    background: none;
+    color: var(--mark);
+  }
+
+  .lede {
+    font-size: 1.15rem;
+    color: var(--paper-dim);
+    max-width: 56ch;
+    margin: 0;
+  }
+
+  .badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 28px;
+  }
+  .badge {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.75rem;
+    padding: 5px 10px;
+    border: 1px solid var(--ink-line);
+    border-radius: 4px;
+    color: var(--paper-dim);
+  }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--ink-line); }
+  section:last-of-type { border-bottom: none; }
+
+  h2 {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 600;
+    font-size: 1.5rem;
+    margin: 0 0 8px;
+  }
+  .section-note { color: var(--paper-dim); margin: 0 0 28px; max-width: 60ch; }
+
+  figure.demo {
+    margin: 0;
+    border: 1px solid var(--ink-line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--ink-raised);
+  }
+  figure.demo img { display: block; width: 100%; height: auto; }
+  figcaption {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.78rem;
+    color: var(--paper-dim);
+    padding: 12px 16px;
+    border-top: 1px solid var(--ink-line);
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--ink-raised);
+    border: 1px solid var(--ink-line);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .card h3 {
+    font-size: 0.95rem;
+    margin: 0 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card p { margin: 0; color: var(--paper-dim); font-size: 0.92rem; }
+
+  .stack-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.85rem;
+  }
+  .stack-list li {
+    padding: 8px 12px;
+    background: var(--ink-raised);
+    border: 1px solid var(--ink-line);
+    border-radius: 6px;
+    color: var(--paper);
+  }
+
+  .why-local {
+    border-left: 3px solid var(--mark);
+    padding: 4px 0 4px 20px;
+    color: var(--paper-dim);
+  }
+  .why-local strong { color: var(--paper); }
+
+  .cta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .btn {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 12px 22px;
+    border-radius: 7px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-primary { background: var(--mark); color: var(--ink); }
+  .btn-primary:hover { background: #ffc933; }
+  .btn-ghost { border: 1px solid var(--ink-line); color: var(--paper); }
+  .btn-ghost:hover { border-color: var(--mark-dim); }
+
+  footer {
+    padding: 40px 0 64px;
+    color: var(--paper-dim);
+    font-size: 0.9rem;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer a { color: var(--paper-dim); }
+  footer a:hover { color: var(--mark); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .hero, section { animation: rise 0.5s ease-out both; }
+    section:nth-of-type(2) { animation-delay: 0.05s; }
+    section:nth-of-type(3) { animation-delay: 0.1s; }
+    section:nth-of-type(4) { animation-delay: 0.15s; }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="eyebrow">Projeto pessoal · RAG</div>
+    <h1>Pergunte a um PDF.<br>Receba a <mark>página</mark> que prova a resposta.</h1>
+    <p class="lede">
+      Um sistema de busca e resposta fundamentada: você sobe um documento, pergunta em
+      linguagem natural, e a resposta vem com o trecho e a página exatos de onde ela saiu —
+      ou com um honesto "não encontrei isso no documento".
+    </p>
+    <div class="badge-row">
+      <span class="badge">Python · FastAPI</span>
+      <span class="badge">PostgreSQL + pgvector</span>
+      <span class="badge">Llama 3.1 8B local</span>
+      <span class="badge">React + TypeScript</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Em ação</h2>
+    <p class="section-note">Upload do PDF, pergunta, resposta com citação — gravado direto do app rodando local.</p>
+    <figure class="demo">
+      <img src="assets/demo.gif" alt="Demonstração: upload de um PDF, pergunta sobre o conteúdo, e resposta com o trecho e a página de origem citados.">
+      <figcaption>docker compose up — Postgres + pgvector, embeddings locais, Llama 3.1 8B via Ollama</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>O que diferencia</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>🔎 Busca por significado</h3>
+        <p>Embeddings vetoriais encontram o trecho certo mesmo quando a pergunta não usa as mesmas palavras do texto.</p>
+      </div>
+      <div class="card">
+        <h3>📎 Citação sempre</h3>
+        <p>Toda resposta vem com o trecho e a página que a fundamentaram — nada de confiar cegamente na LLM.</p>
+      </div>
+      <div class="card">
+        <h3>🛑 Admite quando não sabe</h3>
+        <p>Um limiar de relevância calibrado bloqueia contexto fraco antes de chegar à LLM. "Não encontrei" é uma resposta correta, não uma falha.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Stack</h2>
+    <ul class="stack-list">
+      <li>FastAPI + Pydantic</li>
+      <li>PostgreSQL + pgvector</li>
+      <li>sentence-transformers</li>
+      <li>Ollama · Llama 3.1 8B</li>
+      <li>PyMuPDF</li>
+      <li>React + Vite + TS</li>
+      <li>pytest</li>
+      <li>Docker Compose</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Por que não tem uma versão ao vivo aqui</h2>
+    <p class="why-local">
+      <strong>Decisão de arquitetura, não limitação:</strong> tanto o embedding quanto a
+      geração de resposta rodam 100% locais — nenhuma chave de API, nenhum dado sai da
+      máquina de quem usa. O mesmo Llama 3.1 8B que garante isso precisa de mais RAM do que
+      qualquer hospedagem gratuita oferece, então a forma honesta de mostrar o projeto é
+      esta página + o código completo, em vez de uma demo hospedada que exigiria abrir mão
+      desse princípio.
+    </p>
+    <div class="cta" style="margin-top: 28px;">
+      <a class="btn btn-primary" href="https://github.com/pedrocesarolvc/projeto-rag">Ver o código no GitHub</a>
+      <a class="btn btn-ghost" href="https://secureflow.pedrocesar.dev">Outro projeto: SecureFlow (ao vivo)</a>
+    </div>
+  </section>
+
+  <footer>
+    <span>Pedro César</span>
+    <span><a href="https://github.com/pedrocesarolvc">github.com/pedrocesarolvc</a></span>
+  </footer>
+</div>
+
+</body>
+</html>

@@ -12,6 +12,7 @@ sem Docker — ver docs/documentacao.md, Etapa 4).
 
 import psycopg
 import pytest
+from pgvector import Vector
 
 from app.config import DATABASE_URL
 from app.indexacao import armazenador
@@ -53,7 +54,7 @@ def test_inserir_e_recuperar_devolve_o_mesmo_vetor(conexao):
         cursor.execute("SELECT vetor FROM chunks WHERE documento_id = 1")
         (vetor_salvo,) = cursor.fetchone()
 
-    assert list(vetor_salvo) == pytest.approx(vetor_esperado, abs=1e-5)
+    assert vetor_salvo.to_list() == pytest.approx(vetor_esperado, abs=1e-5)
 
 
 # --- a query de distância devolve os chunks na ordem esperada ---
@@ -71,7 +72,7 @@ def test_query_de_distancia_devolve_chunks_na_ordem_esperada(conexao):
     ]
     armazenador.indexar(conexao, documento_id=1, chunks=chunks)
 
-    vetor_pergunta = gerar_embeddings(["qual o prazo de rescisao do contrato?"])[0]
+    vetor_pergunta = Vector(gerar_embeddings(["qual o prazo de rescisao do contrato?"])[0])
 
     with conexao.cursor() as cursor:
         cursor.execute(

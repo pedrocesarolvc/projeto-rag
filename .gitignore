@@ -11,3 +11,7 @@ venv/
 # PDFs de usuário enviados via upload (não confundir com tests/fixtures/,
 # que guarda PDFs de teste versionados de propósito)
 uploads/
+
+# Override local do Docker Compose (específico de cada máquina — ver
+# docker-compose.override.yml para o motivo de existir por aqui)
+docker-compose.override.yml

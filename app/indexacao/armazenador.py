@@ -17,6 +17,7 @@ lugar para guardar o nome original do arquivo e o status
 """
 
 import psycopg
+from pgvector import Vector
 from pgvector.psycopg import register_vector
 
 from app.config import DATABASE_URL
@@ -133,7 +134,18 @@ def indexar(conexao: psycopg.Connection, documento_id: int, chunks: list[dict]) 
             VALUES (%s, %s, %s, %s, %s)
             """,
             [
-                (documento_id, chunk["indice"], chunk["pagina"], chunk["texto"], vetor)
+                (
+                    documento_id,
+                    chunk["indice"],
+                    chunk["pagina"],
+                    chunk["texto"],
+                    # Vector(...), não a list[float] crua: o adaptador do
+                    # pgvector só reconhece Vector/ndarray como parâmetro
+                    # (ver register_vector_info) — uma lista pura cai no
+                    # dumper padrão do psycopg e vira array double
+                    # precision, não vector. Buscador.py tem a mesma regra.
+                    Vector(vetor),
+                )
                 for chunk, vetor in zip(chunks, vetores)
             ],
         )

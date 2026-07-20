@@ -12,6 +12,8 @@ essa parte tenha cobertura rodando de verdade, sempre.
 
 from unittest.mock import MagicMock
 
+from pgvector import Vector
+
 from app.recuperacao.buscador import buscar
 
 
@@ -90,5 +92,9 @@ def test_query_recebe_documento_id_e_k_corretos():
     # distância exibida) e no ORDER BY (para ordenar) — não pode
     # divergir, ou a distância mostrada mentiria sobre a ordenação
     assert vetor_select == vetor_order_by
-    assert isinstance(vetor_select, list)
-    assert len(vetor_select) == 768
+    # Vector, não list: é o tipo que o adaptador do pgvector reconhece
+    # como parâmetro — uma list pura cai no dumper padrão do psycopg e
+    # vira array double precision, e o operador <=> não casa com isso
+    # (achado testando contra um Postgres real — ver buscador.py)
+    assert isinstance(vetor_select, Vector)
+    assert len(vetor_select.to_list()) == 768

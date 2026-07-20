@@ -3,10 +3,12 @@
 Converse com um PDF: respostas fundamentadas no documento, sempre com a página de origem.
 
 <!--
-Captura de tela / GIF da demo — pendente. Entra aqui assim que
-`docker compose up` for validado de ponta a ponta neste ambiente:
-upload de um PDF, uma pergunta com resposta no documento (citação ao
-lado) e uma pergunta fora do documento (resposta "não encontrei").
+Captura de tela / GIF da demo — pendente só a imagem em si (`docker
+compose up` já foi validado de ponta a ponta: build, os dois serviços
+saudáveis, upload de PDF, pergunta respondida com citação, e pergunta
+fora do documento respondida com "não encontrei" — os 2 testes de
+ponta a ponta da Etapa 7 passam contra o stack real). Basta abrir
+http://localhost:8000, repetir o fluxo e tirar o print/GIF aqui.
 -->
 
 O usuário sobe um PDF e pergunta sobre o conteúdo dele em linguagem natural. O sistema busca por

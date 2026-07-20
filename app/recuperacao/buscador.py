@@ -13,6 +13,8 @@ aqui seria comparar mapas diferentes, seção 5.3); mede-se a distância
 de cosseno no Postgres; pega-se o top-k.
 """
 
+from pgvector import Vector
+
 from app.indexacao.embedder import gerar_embeddings
 
 # Chutes educados (seções 5.4 e 5.5), sem evals para medir o ideal —
@@ -48,7 +50,14 @@ def buscar(
     Lista vazia é uma resposta válida — é o que permite à Etapa 6
     responder "não encontrei isso no documento" em vez de inventar.
     """
-    vetor_pergunta = gerar_embeddings([pergunta])[0]
+    # embedder.py devolve list[float] puro — de propósito, não conhece
+    # Postgres nem pgvector (Etapa 4 não depende da Etapa 5 para trás).
+    # O wrap em Vector() é local, só onde o driver precisa saber que
+    # isto é um vetor: sem ele, o adaptador do pgvector cai no dumper
+    # padrão de lista e manda um array double precision — o operador
+    # <=> não casa com isso (UndefinedFunction), achado só ao testar
+    # contra um Postgres real.
+    vetor_pergunta = Vector(gerar_embeddings([pergunta])[0])
 
     with conexao.cursor() as cursor:
         cursor.execute(

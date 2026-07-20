@@ -2,14 +2,7 @@
 
 Converse com um PDF: respostas fundamentadas no documento, sempre com a página de origem.
 
-<!--
-Captura de tela / GIF da demo — pendente só a imagem em si (`docker
-compose up` já foi validado de ponta a ponta: build, os dois serviços
-saudáveis, upload de PDF, pergunta respondida com citação, e pergunta
-fora do documento respondida com "não encontrei" — os 2 testes de
-ponta a ponta da Etapa 7 passam contra o stack real). Basta abrir
-http://localhost:8000, repetir o fluxo e tirar o print/GIF aqui.
--->
+![Demo: upload de PDF, pergunta e resposta com citação de página](docs/assets/demo.gif)
 
 O usuário sobe um PDF e pergunta sobre o conteúdo dele em linguagem natural. O sistema busca por
 significado (não por palavra igual), monta um prompt com os trechos relevantes, e a LLM responde

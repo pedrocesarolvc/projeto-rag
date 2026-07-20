@@ -25,23 +25,42 @@ Documentação completa, por etapas — o raciocínio por trás de cada decisão
 
 ## Como rodar
 
-Pré-requisito: [Ollama](https://ollama.com) instalado e rodando, com o modelo de geração baixado
-(a LLM roda local, sem chave de API — ver "Decisões de arquitetura"):
+**Pré-requisitos**, os dois rodando local, sem chave de API nenhuma (ver "Decisões de arquitetura"):
 
-```
-ollama pull llama3.1:8b
-```
+1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) instalado e **aberto** — espere
+   o ícone da baleia ficar estável na bandeja do sistema antes do próximo passo.
+2. [Ollama](https://ollama.com) instalado e rodando, com o modelo de geração baixado:
+   ```
+   ollama pull llama3.1:8b
+   ```
 
-Com isso de pé, dois comandos:
+Com os dois de pé, na raiz do projeto:
 
 ```
 docker compose up --build
-# abra http://localhost:8000
 ```
+
+Abra **http://localhost:8000**.
 
 O primeiro `docker compose up` demora mais — builda a imagem, baixa a imagem do Postgres com
 pgvector, e a aplicação baixa o modelo de embedding (~1 GB) na primeira vez que processa um
-documento. As próximas subidas são rápidas.
+documento. As próximas subidas são rápidas (o cache do build e o modelo já baixado ficam salvos
+em volumes).
+
+**Usando a interface:**
+
+1. Clique em "Escolher PDF" e suba um PDF com texto de verdade (não escaneado). Espere o status
+   virar "pronto" — a indexação é síncrona (ver "Decisões de arquitetura"), então a tela fica
+   esperando até terminar.
+2. Digite uma pergunta sobre o conteúdo do documento e clique "Perguntar". Perguntas muito
+   genéricas ("do que se trata isto?") tendem a ficar longe de qualquer trecho no espaço vetorial
+   e disparam o "não encontrei" — pergunte algo específico que esteja no texto.
+3. A resposta aparece com as citações (trecho + página) logo abaixo. Depois de indexado, o
+   documento continua disponível — não precisa subir de novo para fazer outra pergunta, mesmo se
+   a página for recarregada.
+
+**Para parar:** `Ctrl+C` no terminal onde rodou `docker compose up`, ou `docker compose down` em
+outra janela.
 
 ## Decisões de arquitetura
 

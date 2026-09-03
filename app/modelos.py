@@ -15,7 +15,27 @@ e mudar a forma agora só para caber em um BaseModel não ensinaria
 nada. Os schemas abaixo são só da borda: o que a API expõe por HTTP.
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
+
+
+class RegistroRequest(BaseModel):
+    """Corpo de POST /auth/registrar (Etapa 7, seção 7.2)."""
+
+    email: EmailStr
+    senha: str = Field(min_length=8)
+
+
+class LoginRequest(BaseModel):
+    """Corpo de POST /auth/login."""
+
+    email: EmailStr
+    senha: str
+
+
+class TokenResponse(BaseModel):
+    """Resposta de POST /auth/registrar e POST /auth/login."""
+
+    token: str
 
 
 class DocumentoResponse(BaseModel):

@@ -52,6 +52,36 @@ h1 {
   color: #c0392b;
 }
 
+.auth-explicacao {
+  margin: 0 0 12px;
+}
+
+.form-auth {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-auth input {
+  padding: 8px 12px;
+  font-size: 16px;
+}
+
+.form-auth button {
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.auth-alternar {
+  background: none;
+  border: none;
+  padding: 12px 0 0;
+  color: var(--text-muted, #666);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 14px;
+}
+
 .texto-resposta {
   font-size: 17px;
   line-height: 1.5;

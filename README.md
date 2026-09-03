@@ -1,8 +1,12 @@
-# Projeto RAG
+# Lastro
 
 Converse com um PDF: respostas fundamentadas no documento, sempre com a página de origem.
 
 ![Demo: upload de PDF, pergunta e resposta com citação de página](docs/assets/demo.gif)
+
+O nome não é ornamental: *lastro* é aquilo que dá sustentação e garantia — exatamente o que
+diferencia este sistema de um chatbot qualquer. Toda resposta é ancorada num trecho verificável do
+documento, e o usuário vê qual.
 
 O usuário sobe um PDF e pergunta sobre o conteúdo dele em linguagem natural. O sistema busca por
 significado (não por palavra igual), monta um prompt com os trechos relevantes, e a LLM responde
@@ -42,15 +46,18 @@ em volumes).
 
 **Usando a interface:**
 
-1. Clique em "Escolher PDF" e suba um PDF com texto de verdade (não escaneado). Espere o status
-   virar "pronto" — a indexação é síncrona (ver "Decisões de arquitetura"), então a tela fica
-   esperando até terminar.
-2. Digite uma pergunta sobre o conteúdo do documento e clique "Perguntar". Perguntas muito
-   genéricas ("do que se trata isto?") tendem a ficar longe de qualquer trecho no espaço vetorial
-   e disparam o "não encontrei" — pergunte algo específico que esteja no texto.
-3. A resposta aparece com as citações (trecho + página) logo abaixo. Depois de indexado, o
-   documento continua disponível — não precisa subir de novo para fazer outra pergunta, mesmo se
-   a página for recarregada.
+1. Clique em "Escolher PDF" e suba um PDF com texto de verdade (não escaneado) — **sem precisar de
+   conta**. Espere o status virar "pronto"; a indexação é síncrona (ver "Decisões de arquitetura"),
+   então a tela fica esperando até terminar.
+2. Digite uma pergunta e clique "Perguntar". **Só agora** aparece a tela de cadastro/login —
+   cadastro adiado, ver "Decisões de arquitetura". Crie a conta (ou entre, se já tiver uma) e a
+   pergunta que você já tinha digitado é enviada sozinha, sem precisar redigitar.
+3. A resposta aparece com as citações (trecho + página) logo abaixo. O documento que você subiu
+   antes de se cadastrar continua acessível na sua conta — é a adoção da sessão anônima, e tem
+   teste de ponta a ponta próprio.
+
+Perguntas muito genéricas ("do que se trata isto?") tendem a ficar longe de qualquer trecho no
+espaço vetorial e disparam o "não encontrei" — pergunte algo específico que esteja no texto.
 
 **Para parar:** `Ctrl+C` no terminal onde rodou `docker compose up`, ou `docker compose down` em
 outra janela.
@@ -74,7 +81,9 @@ escolha em si. O raciocínio completo de cada uma está em `docs/documentacao.md
 | **Grounding + limiar = "não sei" como resposta válida** | Dois freios em etapas diferentes: o limiar da Etapa 5 impede contexto irrelevante de chegar à LLM; a instrução da Etapa 6 manda admitir quando a resposta não está no contexto. Um RAG que diz "não encontrei" está funcionando — a alternativa (inventar) é o único resultado inaceitável (Etapas 5 e 6) |
 | **Indexação síncrona**, fila assíncrona no roadmap | Fila (Celery/ARQ + Redis) é o padrão de produção, mas é uma peça de infraestrutura inteira que não ensina nada sobre RAG. O teto de 20 MB do upload mantém o tempo síncrono aceitável no v1 (Etapa 7) |
 | **Ollama roda no host, fora do `docker-compose.yml`** | É um runtime pesado (modelo de alguns GB) que faz mais sentido como pré-requisito instalado uma vez do que reconstruído a cada `docker compose up`. O app o alcança via `host.docker.internal` — os dois serviços do compose continuam sendo só aplicação e banco (Etapa 7) |
-| **Interface mínima**: upload, pergunta, resposta, citação — nada além disso | Login, histórico, múltiplos documentos e tema escuro são polimento que não demonstra RAG. A citação é o único capricho aceito: é o que fecha o ciclo de confiança (Etapas 6 e 7) |
+| **Cadastro adiado: conta exigida só na primeira pergunta**, não no upload | Pedir cadastro antes do usuário ver qualquer valor é a forma mais eficiente de perdê-lo. Adiar a barreira transforma o cadastro em preservação do documento já processado, não em pedágio (Etapa 1, seção 1.5) |
+| **Sessão anônima com adoção no cadastro/login** | Entre o upload e a conta, o documento pertence a um token de sessão anônima. Cadastro e login transferem esses documentos para o usuário — na mesma transação da criação da conta, para nunca cadastrar sem entregar o que motivou o cadastro (Etapa 7, seção 7.3) |
+| **Interface mínima**: upload, pergunta, resposta, citação, cadastro/login — nada além disso | Histórico de conversas, múltiplos documentos e tema escuro são polimento que não demonstra o núcleo. A citação é o único capricho aceito: é o que fecha o ciclo de confiança (Etapas 6 e 7) |
 
 ## Limitações conhecidas (v1) e roadmap
 
@@ -92,7 +101,7 @@ onde parou por escolha, não por não saber o que vem depois.
 | k e limiar são chutes calibrados, não medidos | Suíte formal de evals |
 | Indexação síncrona (upload grande demora a requisição inteira) | Fila assíncrona (Celery/ARQ + Redis) |
 | Resposta aparece pronta, não token a token | Streaming (SSE) |
-| Sem login nem separação entre usuários | Autenticação e multiusuário |
+| Documentos não podem ser compartilhados entre usuários — o v1 isola por dono | Compartilhamento com permissões |
 | Documento sai para a LLM local, mas nada impede dado pessoal nele | Anonimização antes do envio — a integração natural com o SecureFlow, o outro projeto do portfólio |
 
 ## Stack
@@ -114,10 +123,13 @@ onde parou por escolha, não por não saber o que vem depois.
 
 ```
 app/
-├── main.py                 # FastAPI: as duas rotas (POST /documentos, POST /perguntas)
-├── pipeline.py              # orquestra as etapas — chamado pelas rotas, sem lógica de RAG em main.py
+├── main.py                 # FastAPI: rotas do núcleo + rotas de conta (seção 7.2)
+├── pipeline.py              # orquestra as etapas e a regra de acesso (eh_dono) — sem lógica de RAG em main.py
 ├── config.py                # configuração via variável de ambiente
 ├── modelos.py                # schemas Pydantic (contratos da API)
+├── auth/                      # Etapa 7 — cadastro adiado (seção 1.5) e adoção de sessão (seção 7.3)
+│   ├── seguranca.py            # hash de senha e token — sem tocar no banco
+│   └── armazenador.py          # tabela usuarios + adoção de documentos
 ├── ingestao/                 # Etapa 2
 │   ├── upload.py             # validação e guarda do arquivo
 │   └── extrator.py           # PDF → texto, página por página
@@ -125,7 +137,7 @@ app/
 │   └── divisor.py              # texto → chunks, por corte recursivo
 ├── indexacao/                  # Etapa 4
 │   ├── embedder.py              # texto → vetor (modelo local)
-│   └── armazenador.py           # grava documentos + chunks + vetores no PostgreSQL
+│   └── armazenador.py           # grava documentos (com dono) + chunks + vetores no PostgreSQL
 ├── recuperacao/                 # Etapa 5
 │   └── buscador.py               # pergunta → chunks mais relevantes
 └── geracao/                     # Etapa 6
@@ -133,6 +145,7 @@ app/
     ├── llm.py                     # chamada isolada ao modelo local (gerar(prompt) -> texto)
     └── responder.py               # monta prompt + chama a LLM
 frontend/                    # Etapa 7 — interface mínima (React + TypeScript + Vite)
+│   └── src/Auth.tsx           # tela de cadastro/login, disparada no 401 de POST /perguntas
 tests/
 ├── fixtures/                # PDFs de teste
 ├── conftest.py              # fixtures compartilhadas (Postgres real)
@@ -142,9 +155,12 @@ tests/
 ├── test_armazenador.py
 ├── test_buscador.py
 ├── test_buscador_unitario.py
+├── test_auth_seguranca.py
+├── test_auth_armazenador.py
+├── test_pipeline.py           # eh_dono() — a regra de acesso
 ├── test_prompt.py
 ├── test_responder.py
-└── test_e2e.py               # Etapa 7 — pipeline inteiro via API real
+└── test_e2e.py               # Etapa 7 — pipeline inteiro via API real, incluindo a adoção de sessão
 docker-compose.yml          # app + Postgres com pgvector
 Dockerfile                  # build do frontend + imagem da aplicação
 ```
@@ -155,7 +171,7 @@ Dockerfile                  # build do frontend + imagem da aplicação
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env   # ajuste DATABASE_URL
+cp .env.example .env   # ajuste DATABASE_URL e SECRET_KEY
 
 ollama pull llama3.1:8b
 
@@ -163,12 +179,12 @@ pytest tests/
 ```
 
 O primeiro `pytest` baixa o modelo de embedding (~1 GB, uma vez só — fica em cache local). Os
-testes de integração (`test_armazenador.py`, `test_buscador.py`, `test_e2e.py`) só rodam se
-`DATABASE_URL` apontar para um Postgres com a extensão `vector` já instalada; caso contrário,
-pulam automaticamente — no Windows sem Docker, pgvector não tem binário pronto e exigiria compilar
-com Visual Studio Build Tools, então o caminho recomendado ali é o Docker mesmo. Nenhum teste
-chama o Ollama de verdade fora de `test_e2e.py`: `llm.gerar()` é substituído por um dublê (mock)
-no resto da suíte.
+testes de integração (`test_armazenador.py`, `test_auth_armazenador.py`, `test_buscador.py`,
+`test_e2e.py`) só rodam se `DATABASE_URL` apontar para um Postgres com a extensão `vector` já
+instalada; caso contrário, pulam automaticamente — no Windows sem Docker, pgvector não tem
+binário pronto e exigiria compilar com Visual Studio Build Tools, então o caminho recomendado ali
+é o Docker mesmo. Nenhum teste chama o Ollama de verdade fora de `test_e2e.py`: `llm.gerar()` é
+substituído por um dublê (mock) no resto da suíte.
 
 Para rodar a API sozinha (sem o frontend buildado):
 

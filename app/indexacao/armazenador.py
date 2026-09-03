@@ -8,12 +8,26 @@ de propósito: o vetor serve para achar; o texto, para usar na
 citação e no prompt (seção 4.9).
 
 Sem framework de migração no v1: duas tabelas, um DDL, direto — o
-mesmo espírito de "sem LangChain" aplicado ao lado do banco.
+mesmo espírito de "sem LangChain" aplicado ao lado do banco. Preço
+real desse trade-off, visto na prática: `CREATE TABLE IF NOT EXISTS`
+não altera uma tabela que já existe com um schema mais antigo — se
+uma coluna nova (como `usuario_id`, da Etapa 7) for adicionada aqui,
+um banco que já rodou uma versão anterior do código não a ganha
+sozinho. Em desenvolvimento, o remédio é recriar o volume do Postgres;
+um projeto com dado real em produção precisaria de uma migração de
+verdade — e é exatamente esse o motivo de "sem migração" ser uma
+decisão do v1, não um esquecimento.
 
 Etapa 7: a tabela `documentos` nasce aqui, não antes — `chunks.documento_id`
 sempre existiu no contrato (seção 4.9), mas só a API precisa de um
-lugar para guardar o nome original do arquivo e o status
-(indexando/pronto/falhou) de cada upload (seção 7.2).
+lugar para guardar o nome original do arquivo, o status
+(indexando/pronto/falhou) e o dono de cada upload (seção 7.2).
+
+O dono é `usuario_id` OU `sessao_anonima_id`, nunca os dois ao mesmo
+tempo até o cadastro adiado (seção 1.5) resolver a ambiguidade: todo
+documento nasce com `sessao_anonima_id` e `usuario_id` nulo; no
+cadastro ou login, `usuario_id` é preenchido (seção 7.3, em
+app/auth/armazenador.py) e o documento passa a pertencer à conta.
 """
 
 import psycopg
@@ -51,10 +65,12 @@ def criar_tabelas(conexao: psycopg.Connection) -> None:
     conexao.execute(
         """
         CREATE TABLE IF NOT EXISTS documentos (
-            id            BIGSERIAL PRIMARY KEY,
-            nome_original TEXT NOT NULL,
-            status        TEXT NOT NULL DEFAULT 'indexando',
-            criado_em     TIMESTAMPTZ NOT NULL DEFAULT now()
+            id                BIGSERIAL PRIMARY KEY,
+            nome_original     TEXT NOT NULL,
+            status            TEXT NOT NULL DEFAULT 'indexando',
+            usuario_id        BIGINT,
+            sessao_anonima_id TEXT,
+            criado_em         TIMESTAMPTZ NOT NULL DEFAULT now()
         )
         """
     )
@@ -73,16 +89,28 @@ def criar_tabelas(conexao: psycopg.Connection) -> None:
     conexao.commit()
 
 
-def criar_documento(conexao: psycopg.Connection, nome_original: str) -> int:
+def criar_documento(
+    conexao: psycopg.Connection,
+    nome_original: str,
+    usuario_id: int | None = None,
+    sessao_anonima_id: str | None = None,
+) -> int:
     """
     Registra um novo documento com status "indexando" e devolve o id
     gerado — usado por POST /documentos antes de rodar a extração e o
     chunking, para já existir um id a que os chunks se associam.
+
+    O documento nasce com o dono que a requisição trouxer: um usuário
+    autenticado (`usuario_id`) ou uma sessão anônima
+    (`sessao_anonima_id`) — nunca os dois, nunca nenhum (seção 1.5).
     """
     with conexao.cursor() as cursor:
         cursor.execute(
-            "INSERT INTO documentos (nome_original) VALUES (%s) RETURNING id",
-            (nome_original,),
+            """
+            INSERT INTO documentos (nome_original, usuario_id, sessao_anonima_id)
+            VALUES (%s, %s, %s) RETURNING id
+            """,
+            (nome_original, usuario_id, sessao_anonima_id),
         )
         (documento_id,) = cursor.fetchone()
     conexao.commit()
@@ -100,10 +128,18 @@ def atualizar_status_documento(
 
 
 def buscar_documento(conexao: psycopg.Connection, documento_id: int) -> dict | None:
-    """Usado por GET /documentos/{id}. None se o id não existir."""
+    """
+    Usado por GET /documentos/{id}, POST /perguntas e DELETE
+    /documentos/{id} — todos precisam do dono (`usuario_id` /
+    `sessao_anonima_id`) para checar acesso antes de agir. None se o
+    id não existir.
+    """
     with conexao.cursor() as cursor:
         cursor.execute(
-            "SELECT id, nome_original, status FROM documentos WHERE id = %s",
+            """
+            SELECT id, nome_original, status, usuario_id, sessao_anonima_id
+            FROM documentos WHERE id = %s
+            """,
             (documento_id,),
         )
         linha = cursor.fetchone()
@@ -111,8 +147,50 @@ def buscar_documento(conexao: psycopg.Connection, documento_id: int) -> dict | N
     if linha is None:
         return None
 
-    documento_id, nome_original, status = linha
-    return {"id": documento_id, "nome_original": nome_original, "status": status}
+    documento_id, nome_original, status, usuario_id, sessao_anonima_id = linha
+    return {
+        "id": documento_id,
+        "nome_original": nome_original,
+        "status": status,
+        "usuario_id": usuario_id,
+        "sessao_anonima_id": sessao_anonima_id,
+    }
+
+
+def listar_documentos(
+    conexao: psycopg.Connection,
+    usuario_id: int | None = None,
+    sessao_anonima_id: str | None = None,
+) -> list[dict]:
+    """
+    Usado por GET /documentos. Lista os documentos do usuário
+    autenticado, ou os da sessão anônima quando não há usuário —
+    nunca os dois conjuntos misturados.
+    """
+    with conexao.cursor() as cursor:
+        if usuario_id is not None:
+            cursor.execute(
+                "SELECT id, nome_original, status FROM documentos WHERE usuario_id = %s ORDER BY criado_em DESC",
+                (usuario_id,),
+            )
+        else:
+            cursor.execute(
+                "SELECT id, nome_original, status FROM documentos WHERE sessao_anonima_id = %s AND usuario_id IS NULL ORDER BY criado_em DESC",
+                (sessao_anonima_id,),
+            )
+        linhas = cursor.fetchall()
+
+    return [
+        {"id": id_, "nome_original": nome_original, "status": status}
+        for id_, nome_original, status in linhas
+    ]
+
+
+def remover_documento(conexao: psycopg.Connection, documento_id: int) -> None:
+    """Usado por DELETE /documentos/{id} — remove o documento e os chunks dele."""
+    conexao.execute("DELETE FROM chunks WHERE documento_id = %s", (documento_id,))
+    conexao.execute("DELETE FROM documentos WHERE id = %s", (documento_id,))
+    conexao.commit()
 
 
 def indexar(conexao: psycopg.Connection, documento_id: int, chunks: list[dict]) -> None:

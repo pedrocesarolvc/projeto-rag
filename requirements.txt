@@ -8,7 +8,7 @@ uvicorn[standard]
 python-multipart  # necessário para o FastAPI aceitar upload de arquivo (POST /documentos)
 
 # Validação (contratos entre etapas — app/modelos.py)
-pydantic
+pydantic[email]
 
 # Configuração via variável de ambiente — app/config.py
 python-dotenv
@@ -25,6 +25,10 @@ pgvector
 
 # LLM local via Ollama — Etapa 6 (app/geracao/llm.py)
 ollama
+
+# Autenticação — Etapa 7 (app/auth/): hash de senha e token de sessão
+bcrypt
+pyjwt
 
 # Testes
 pytest

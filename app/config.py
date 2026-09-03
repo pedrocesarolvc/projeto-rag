@@ -26,3 +26,8 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 # A LLM que gera a resposta (Etapa 6) roda local via Ollama, assim
 # como o modelo de embedding (Etapa 4) — nenhuma das duas precisa de
 # chave de API (seção 6.7 da documentação, decisão revista).
+
+# Assina e verifica o token de autenticação (Etapa 7, app/auth/).
+# Trocar essa chave invalida todos os tokens emitidos — usuários
+# precisam logar de novo, mas nenhum dado é perdido.
+SECRET_KEY = os.environ.get("SECRET_KEY")

@@ -42,12 +42,22 @@ def conectar() -> psycopg.Connection:
     """
     Abre a conexão, garante a extensão pgvector (seção 4.7) e registra
     o adaptador que converte `list[float]` <-> `vector` do Postgres.
+
+    `prepare_threshold=None` desliga os prepared statements
+    server-side que o psycopg cria automaticamente após a 5ª execução
+    de uma mesma query. Sem efeito prático contra um Postgres direto
+    (Docker local); necessário contra um endpoint com PgBouncer em
+    transaction pooling (ex.: o "pooler" da Neon, usado no deploy
+    público) — lá, cada transação pode cair numa conexão de servidor
+    diferente, e um prepared statement preparado numa não existe na
+    próxima, quebrando a query com "prepared statement does not
+    exist".
     """
     if not DATABASE_URL:
         raise RuntimeError(
             "DATABASE_URL não configurada — defina no .env (ver .env.example)."
         )
-    conexao = psycopg.connect(DATABASE_URL, autocommit=False)
+    conexao = psycopg.connect(DATABASE_URL, autocommit=False, prepare_threshold=None)
     conexao.execute("CREATE EXTENSION IF NOT EXISTS vector")
     conexao.commit()
     register_vector(conexao)

@@ -23,8 +23,12 @@ sentence-transformers
 psycopg[binary]
 pgvector
 
-# LLM local via Ollama — Etapa 6 (app/geracao/llm.py)
+# LLM — Etapa 6 (app/geracao/llm.py). Ollama para uso local; groq só
+# entra em ação quando LLM_PROVIDER=groq (instância pública, ver
+# app/config.py) — mas o pacote fica instalado sempre, é leve (só um
+# cliente HTTP) e assim a mesma imagem serve os dois ambientes.
 ollama
+groq
 
 # Autenticação — Etapa 7 (app/auth/): hash de senha e token de sessão
 bcrypt

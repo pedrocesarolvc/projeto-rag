@@ -27,13 +27,13 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 # como o modelo de embedding (Etapa 4) — nenhuma das duas precisa de
 # chave de API (seção 6.7 da documentação, decisão revista).
 #
-# Exceção deliberada para a instância pública (Hugging Face Spaces):
-# um Space grátis não tem GPU nem CPU dedicada para rodar um modelo
-# local com latência aceitável ao vivo. LLM_PROVIDER=groq troca só a
-# geração (o embedding continua local, ver app/indexacao/embedder.py)
-# pela API gratuita da Groq — mais rápida que qualquer alternativa
-# hospedada de graça, e sem exigir cartão de crédito. O padrão
-# continua Ollama; isto não muda nada para quem roda localmente.
+# Exceção deliberada para a instância pública: um ambiente sem GPU
+# nem CPU dedicada não roda um modelo local com latência aceitável ao
+# vivo. LLM_PROVIDER=groq troca só a geração (o embedding continua
+# local, ver app/indexacao/embedder.py) pela API gratuita da Groq —
+# mais rápida que qualquer alternativa hospedada de graça, e sem
+# exigir cartão de crédito. O padrão continua Ollama; isto não muda
+# nada para quem roda localmente.
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")

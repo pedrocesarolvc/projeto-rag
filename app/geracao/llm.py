@@ -15,12 +15,12 @@ cartão de crédito para rodar o projeto: mesmo princípio de
 privacidade que já vale para o embedding (Etapa 4), agora também na
 geração.
 
-Segunda decisão, só para a instância pública: um Hugging Face Space
-grátis não tem GPU nem CPU dedicada para rodar um modelo local com
-latência aceitável numa demonstração ao vivo. `LLM_PROVIDER=groq`
-(app/config.py) troca a chamada para a API gratuita da Groq nessa
-instância específica — o resto do pipeline (retrieval, prompt,
-grounding) não muda uma linha, porque a fronteira já era esta função.
+Segunda decisão, só para a instância pública: sem GPU nem CPU
+dedicada, um modelo local não responde com latência aceitável numa
+demonstração ao vivo. `LLM_PROVIDER=groq` (app/config.py) troca a
+chamada para a API gratuita da Groq nessa instância específica — o
+resto do pipeline (retrieval, prompt, grounding) não muda uma linha,
+porque a fronteira já era esta função.
 """
 
 import ollama

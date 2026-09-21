@@ -1,5 +1,8 @@
 # Segredos reais (o exemplo sem segredos é .env.example, que fica versionado)
 .env
+# Credenciais da demo pública (Neon + Groq) — reabrir a instância local
+# via túnel sem precisar pedir de novo. Mesmo motivo de .env acima.
+.env.demo
 
 # Python
 __pycache__/

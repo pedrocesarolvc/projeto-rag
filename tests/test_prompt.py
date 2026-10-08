@@ -13,7 +13,9 @@ from app.geracao.prompt import INSTRUCAO, SEM_CONTEXTO, montar_prompt
 
 
 def test_prompt_tem_instrucao_contexto_e_pergunta_na_ordem_certa():
-    chunks = [{"pagina": 3, "texto": "trecho relevante", "distancia": 0.2}]
+    chunks = [
+        {"documento": "contrato.pdf", "pagina": 3, "texto": "trecho relevante", "distancia": 0.2}
+    ]
 
     prompt = montar_prompt("qual o prazo de rescisao?", chunks)
 
@@ -25,19 +27,29 @@ def test_prompt_tem_instrucao_contexto_e_pergunta_na_ordem_certa():
     assert pos_instrucao < pos_contexto < pos_pergunta
 
 
-# --- todos os chunks recuperados entram no contexto, com sua página ---
+# --- todos os chunks recuperados entram no contexto, com documento e página ---
 
 
-def test_todos_os_chunks_entram_no_contexto_com_sua_pagina():
+def test_todos_os_chunks_entram_no_contexto_com_documento_e_pagina():
     chunks = [
-        {"pagina": 3, "texto": "primeiro trecho", "distancia": 0.1},
-        {"pagina": 7, "texto": "segundo trecho", "distancia": 0.3},
+        {"documento": "contrato.pdf", "pagina": 3, "texto": "primeiro trecho", "distancia": 0.1},
+        {"documento": "aditivo.pdf", "pagina": 7, "texto": "segundo trecho", "distancia": 0.3},
     ]
 
     prompt = montar_prompt("pergunta qualquer", chunks)
 
-    assert "primeiro trecho" in prompt and "pág. 3" in prompt
-    assert "segundo trecho" in prompt and "pág. 7" in prompt
+    # o rótulo junta documento e página no mesmo colchete: é o que
+    # permite à LLM atribuir cada fato ao PDF certo quando há dois
+    assert "[contrato.pdf, pág. 3] primeiro trecho" in prompt
+    assert "[aditivo.pdf, pág. 7] segundo trecho" in prompt
+
+
+# --- a instrução pede documento + página e a divergência entre documentos ---
+
+
+def test_instrucao_pede_documento_pagina_e_divergencia():
+    assert "documento e a página" in INSTRUCAO
+    assert "divergência" in INSTRUCAO
 
 
 # --- contexto vazio produz um prompt que instrui o "não sei" ---

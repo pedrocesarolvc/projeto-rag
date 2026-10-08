@@ -788,12 +788,16 @@ A Etapa 5 entrega à 6:
 
 ```python
 [
-    {"pagina": 3, "texto": "...", "distancia": 0.18},
-    {"pagina": 7, "texto": "...", "distancia": 0.24},
+    {"documento_id": 10, "pagina": 3, "texto": "...", "distancia": 0.18},
+    {"documento_id": 20, "pagina": 7, "texto": "...", "distancia": 0.24},
 ]
 ```
 
 A `distancia` viaja junto de propósito: alimenta o limiar da 5.5 e, na interface, permite mostrar ao usuário o quão forte foi cada correspondência. `pagina` e `texto` são o que a citação da Etapa 6 vai exibir — os mesmos campos que nasceram nas Etapas 2 e 3, atravessando o pipeline inteiro até a tela.
+
+**Mais de um documento por pergunta.** A pergunta pode valer para até 2 documentos ao mesmo tempo, e é para isso que cada chunk volta com o seu `documento_id`. A busca faz o top-k **por documento** e depois junta e reordena por distância. Um top-k global sobre dois PDFs deixaria o mais "falante" para aquela pergunta ocupar todas as vagas e esconder o outro — exatamente o que impediria juntar as informações dos dois. O limiar continua valendo: se o assunto só existe num dos PDFs, só ele contribui. Com um documento só, nada muda.
+
+A Etapa 5 devolve o `documento_id`, não o nome do arquivo: ela só conhece a tabela `chunks`. Quem junta as duas pontas é a orquestração (`pipeline.py`), que acrescenta o `documento` (nome) a cada chunk antes de entregá-lo à Etapa 6.
 
 ## 5.10 Como testar
 
@@ -917,7 +921,7 @@ E repare no caminho que a página percorreu para chegar aqui:
 
 Cinco etapas atrás, decidir extrair "página por página" parecia um detalhe técnico da ingestão. Era, na verdade, a primeira metade desta citação. **É por isso que a decisão da Etapa 2 e a feature da Etapa 6 são a mesma coisa, tomada em dois momentos** — algo que a Etapa 2 já prenunciava e que só agora se completa.
 
-Como conseguir a citação, na prática: peça no prompt que o modelo referencie a página de cada afirmação, já que cada chunk entra no contexto rotulado com a sua (`[pág. 3]`). No v1 basta isso, mais exibir na interface os chunks que a Etapa 5 recuperou, ao lado da resposta. O usuário lê a resposta e vê, do lado, os trechos originais com a página. Ciclo de confiança fechado.
+Como conseguir a citação, na prática: peça no prompt que o modelo referencie o documento e a página de cada afirmação, já que cada chunk entra no contexto rotulado com os dois (`[contrato.pdf, pág. 3]`). O nome do arquivo no rótulo é o que permite, numa pergunta sobre dois PDFs, atribuir cada fato ao documento certo — e a instrução pede que a LLM aponte a divergência quando eles discordarem, em vez de escolher um lado em silêncio. No v1 basta isso, mais exibir na interface os chunks que a Etapa 5 recuperou, ao lado da resposta. O usuário lê a resposta e vê, do lado, os trechos originais com a página. Ciclo de confiança fechado.
 
 ## 6.7 A LLM: local ou API
 
@@ -1025,6 +1029,8 @@ Ao redor delas, as rotas de conta:
 | `POST` | `/auth/login` | Autentica e adota os documentos da sessão anônima |
 | `GET` | `/documentos` | Lista os documentos do usuário (ou da sessão anônima) |
 | `DELETE` | `/documentos/{id}` | Remove o documento e os dados dele derivados |
+
+`POST /perguntas` recebe `documento_ids` (de 1 a 2) e a pergunta; a resposta junta o que vier de todos os documentos pedidos, e cada citação diz de qual arquivo veio. A posse é conferida em **cada** id, e basta um falhar para o pedido inteiro responder `404`: sem isso, um PDF seu serviria de isca para alcançar o de outra pessoa. Mais de 2 ids, ou nenhum, é `422` — o teto é uma escolha do v1, não do desenho.
 
 **A regra de acesso que atravessa todas elas:** `/documentos` e `/perguntas` aceitam tanto um usuário autenticado quanto uma sessão anônima — **exceto `POST /perguntas`, que exige conta.** É essa exigência, e só ela, que dispara a tela de login no frontend. O servidor responde `401` e o cliente abre o cadastro; nenhuma outra rota faz isso.
 

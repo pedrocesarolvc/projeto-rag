@@ -267,13 +267,25 @@ def criar_pergunta(
     A única rota que exige conta (seção 7.2). `sessao_anonima_id=None`
     na checagem de posse é proposital: uma vez autenticado, só o dono
     por usuário conta — a sessão anônima não abre mais pergunta nenhuma.
+
+    A pergunta vale para todos os documentos pedidos (até 2). A posse é
+    conferida em CADA um, e basta um falhar para o pedido inteiro
+    responder 404: senão um PDF seu serviria de isca para alcançar o de
+    outra pessoa, e a resposta denunciaria que ele existe.
     """
+    # dict.fromkeys tira ids repetidos mantendo a ordem — pedir o mesmo
+    # PDF duas vezes não deve buscá-lo duas vezes nem duplicar citações.
+    documento_ids = list(dict.fromkeys(pedido.documento_ids))
+
     conexao = armazenador.conectar()
     try:
-        documento = armazenador.buscar_documento(conexao, pedido.documento_id)
-        if documento is None or not eh_dono(documento, usuario_id, None):
-            raise HTTPException(status_code=404, detail="Documento não encontrado.")
-        resultado = responder_pergunta(conexao, pedido.documento_id, pedido.pergunta)
+        documentos = []
+        for documento_id in documento_ids:
+            documento = armazenador.buscar_documento(conexao, documento_id)
+            if documento is None or not eh_dono(documento, usuario_id, None):
+                raise HTTPException(status_code=404, detail="Documento não encontrado.")
+            documentos.append(documento)
+        resultado = responder_pergunta(conexao, documentos, pedido.pergunta)
     finally:
         conexao.close()
 

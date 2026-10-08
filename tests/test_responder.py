@@ -21,7 +21,9 @@ def test_gerar_e_chamado_uma_vez_com_o_prompt_montado(monkeypatch):
     gerar_fake = MagicMock(return_value="resposta qualquer da LLM")
     monkeypatch.setattr(modulo_responder, "gerar", gerar_fake)
 
-    chunks = [{"pagina": 3, "texto": "trecho relevante", "distancia": 0.1}]
+    chunks = [
+        {"documento": "contrato.pdf", "pagina": 3, "texto": "trecho relevante", "distancia": 0.1}
+    ]
     resultado = modulo_responder.responder("qual o prazo de rescisao?", chunks)
 
     gerar_fake.assert_called_once()
@@ -36,7 +38,7 @@ def test_gerar_e_chamado_uma_vez_com_o_prompt_montado(monkeypatch):
 def test_retorno_traz_resposta_e_os_chunks_recebidos(monkeypatch):
     monkeypatch.setattr(modulo_responder, "gerar", MagicMock(return_value="a resposta"))
 
-    chunks = [{"pagina": 5, "texto": "trecho", "distancia": 0.2}]
+    chunks = [{"documento": "contrato.pdf", "pagina": 5, "texto": "trecho", "distancia": 0.2}]
     resultado = modulo_responder.responder("pergunta qualquer", chunks)
 
     assert resultado == {"resposta": "a resposta", "chunks": chunks}

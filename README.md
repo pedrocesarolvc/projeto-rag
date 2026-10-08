@@ -1,6 +1,6 @@
 # Lastro
 
-Converse com um PDF: respostas fundamentadas no documento, sempre com a página de origem.
+Converse com até dois PDFs: respostas fundamentadas nos documentos, sempre com o arquivo e a página de origem.
 
 ![Demo: upload de PDF, pergunta e resposta com citação de página](docs/assets/demo.gif)
 
@@ -48,11 +48,13 @@ em volumes).
 
 1. Clique em "Escolher PDF" e suba um PDF com texto de verdade (não escaneado) — **sem precisar de
    conta**. Espere o status virar "pronto"; a indexação é síncrona (ver "Decisões de arquitetura"),
-   então a tela fica esperando até terminar.
+   então a tela fica esperando até terminar. Se quiser ampliar o conhecimento, clique em "Adicionar
+   segundo PDF" (o limite é 2 por pergunta; "remover" libera a vaga). A pergunta vale para todos os
+   PDFs marcados — desmarque um para perguntar só sobre o outro.
 2. Digite uma pergunta e clique "Perguntar". **Só agora** aparece a tela de cadastro/login —
    cadastro adiado, ver "Decisões de arquitetura". Crie a conta (ou entre, se já tiver uma) e a
    pergunta que você já tinha digitado é enviada sozinha, sem precisar redigitar.
-3. A resposta aparece com as citações (trecho + página) logo abaixo. O documento que você subiu
+3. A resposta aparece com as citações (trecho + arquivo + página) logo abaixo. O documento que você subiu
    antes de se cadastrar continua acessível na sua conta — é a adoção da sessão anônima, e tem
    teste de ponta a ponta próprio.
 
@@ -83,7 +85,8 @@ escolha em si. O raciocínio completo de cada uma está em `docs/documentacao.md
 | **Ollama roda no host, fora do `docker-compose.yml`** | É um runtime pesado (modelo de alguns GB) que faz mais sentido como pré-requisito instalado uma vez do que reconstruído a cada `docker compose up`. O app o alcança via `host.docker.internal` — os dois serviços do compose continuam sendo só aplicação e banco (Etapa 7) |
 | **Cadastro adiado: conta exigida só na primeira pergunta**, não no upload | Pedir cadastro antes do usuário ver qualquer valor é a forma mais eficiente de perdê-lo. Adiar a barreira transforma o cadastro em preservação do documento já processado, não em pedágio (Etapa 1, seção 1.5) |
 | **Sessão anônima com adoção no cadastro/login** | Entre o upload e a conta, o documento pertence a um token de sessão anônima. Cadastro e login transferem esses documentos para o usuário — na mesma transação da criação da conta, para nunca cadastrar sem entregar o que motivou o cadastro (Etapa 7, seção 7.3) |
-| **Interface mínima**: upload, pergunta, resposta, citação, cadastro/login — nada além disso | Histórico de conversas, múltiplos documentos e tema escuro são polimento que não demonstra o núcleo. A citação é o único capricho aceito: é o que fecha o ciclo de confiança (Etapas 6 e 7) |
+| **Interface mínima**: upload, pergunta, resposta, citação, cadastro/login — nada além disso | Histórico de conversas e tema escuro são polimento que não demonstra o núcleo. A citação é o único capricho aceito: é o que fecha o ciclo de confiança (Etapas 6 e 7) |
+| **Até 2 PDFs por pergunta, com top-k por documento** | A pergunta junta o conhecimento dos dois PDFs, e cada citação diz de qual arquivo veio; desmarcar um na tela faz a pergunta valer só para o outro. O top-k é por documento, não global, para um PDF não ocupar todas as vagas e esconder o outro. O teto de 2 é do v1, não do desenho (Etapas 5 e 7) |
 
 ## Limitações conhecidas (v1) e roadmap
 
@@ -93,7 +96,7 @@ onde parou por escolha, não por não saber o que vem depois.
 
 | Limitação do v1 | Correção no roadmap |
 |---|---|
-| Apenas PDF, um documento por vez | DOCX e múltiplos documentos por coleção |
+| Apenas PDF, e no máximo 2 documentos por pergunta | DOCX e coleções maiores de documentos (aí o top-k por documento precisa dar lugar a uma busca em todo o acervo) |
 | PDF escaneado não é aceito (sem camada de texto) | OCR |
 | Texto em duas colunas pode sair embaralhado; tabelas viram texto corrido | PDF não garante ordem de leitura nem guarda estrutura de tabela — sem correção simples no roadmap atual |
 | Busca só semântica — erra código, nome próprio, número exato | Busca híbrida (semântica + `tsvector`), o item mais valioso do roadmap |

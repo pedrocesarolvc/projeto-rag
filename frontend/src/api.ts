@@ -11,6 +11,7 @@ export interface Documento {
 }
 
 export interface Citacao {
+  documento: string;
   pagina: number;
   texto: string;
   distancia: number;
@@ -104,11 +105,21 @@ export async function enviarDocumento(arquivo: File): Promise<Documento> {
   return resposta.json();
 }
 
-export async function perguntar(documentoId: number, pergunta: string): Promise<Resposta> {
+export async function removerDocumento(documentoId: number): Promise<void> {
+  const resposta = await fetch(`/documentos/${documentoId}`, {
+    method: "DELETE",
+    headers: cabecalhosAuth(),
+  });
+  if (!resposta.ok) await tratarErro(resposta);
+}
+
+// A pergunta vale para todos os documentos da lista (o servidor limita
+// a 2): a resposta junta o que vier de cada um.
+export async function perguntar(documentoIds: number[], pergunta: string): Promise<Resposta> {
   const resposta = await fetch("/perguntas", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...cabecalhosAuth() },
-    body: JSON.stringify({ documento_id: documentoId, pergunta }),
+    body: JSON.stringify({ documento_ids: documentoIds, pergunta }),
   });
   if (!resposta.ok) await tratarErro(resposta);
   return resposta.json();

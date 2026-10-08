@@ -79,7 +79,7 @@ def documento_indexado(conexao):
 
 
 def test_pergunta_direta_recupera_o_chunk_da_pagina_certa(documento_indexado):
-    resultado = buscar(documento_indexado, DOCUMENTO_ID, "qual o valor do aluguel mensal?")
+    resultado = buscar(documento_indexado, [DOCUMENTO_ID], "qual o valor do aluguel mensal?")
 
     assert any(r["pagina"] == 2 for r in resultado)
 
@@ -88,7 +88,7 @@ def test_pergunta_direta_recupera_o_chunk_da_pagina_certa(documento_indexado):
 
 
 def test_assunto_ausente_devolve_lista_vazia(documento_indexado):
-    resultado = buscar(documento_indexado, DOCUMENTO_ID, "qual a receita de lasanha?")
+    resultado = buscar(documento_indexado, [DOCUMENTO_ID], "qual a receita de lasanha?")
 
     assert resultado == []
 
@@ -99,7 +99,7 @@ def test_assunto_ausente_devolve_lista_vazia(documento_indexado):
 def test_k_limita_a_quantidade_de_chunks(documento_indexado):
     resultado = buscar(
         documento_indexado,
-        DOCUMENTO_ID,
+        [DOCUMENTO_ID],
         "fale sobre o contrato",
         k=3,
         limiar=2.0,  # limiar solto de propósito: este teste é sobre o k, não sobre relevância
@@ -113,7 +113,7 @@ def test_k_limita_a_quantidade_de_chunks(documento_indexado):
 
 def test_resultados_vem_ordenados_por_distancia_crescente(documento_indexado):
     resultado = buscar(
-        documento_indexado, DOCUMENTO_ID, "fale sobre o contrato", limiar=2.0
+        documento_indexado, [DOCUMENTO_ID], "fale sobre o contrato", limiar=2.0
     )
 
     distancias = [r["distancia"] for r in resultado]
@@ -125,7 +125,7 @@ def test_resultados_vem_ordenados_por_distancia_crescente(documento_indexado):
 
 def test_sinonimo_recupera_o_trecho_certo(documento_indexado):
     resultado = buscar(
-        documento_indexado, DOCUMENTO_ID, "qual o prazo de rescisao do contrato?"
+        documento_indexado, [DOCUMENTO_ID], "qual o prazo de rescisao do contrato?"
     )
 
     assert any(r["pagina"] == 3 for r in resultado)
@@ -145,7 +145,50 @@ def test_pergunta_por_codigo_exato_nao_distingue_codigo_parecido(documento_index
     roadmap, não no v1.
     """
     resultado = buscar(
-        documento_indexado, DOCUMENTO_ID, "o produto XPT-4471 tem garantia de quanto tempo?"
+        documento_indexado, [DOCUMENTO_ID], "o produto XPT-4471 tem garantia de quanto tempo?"
     )
 
     assert any(r["pagina"] == 5 for r in resultado)
+
+
+# --- dois documentos: o top-k é por documento, os dois ficam representados ---
+
+
+def test_dois_documentos_ficam_ambos_representados_no_resultado(conexao):
+    """
+    k=1 e limiar solto de propósito: o teste é sobre a estrutura (uma
+    vaga POR documento), não sobre relevância. Com um top-k global de 1,
+    só um dos dois documentos apareceria — com o por documento, os
+    dois aparecem.
+    """
+    armazenador.indexar(
+        conexao,
+        documento_id=1,
+        chunks=[{"indice": 0, "pagina": 1, "texto": "O aluguel mensal e de tres mil reais."}],
+    )
+    armazenador.indexar(
+        conexao,
+        documento_id=2,
+        chunks=[{"indice": 0, "pagina": 4, "texto": "O distrato exige noventa dias de aviso."}],
+    )
+
+    resultado = buscar(conexao, [1, 2], "valor do aluguel", k=1, limiar=2.0)
+
+    assert {r["documento_id"] for r in resultado} == {1, 2}
+
+
+def test_um_documento_nao_vaza_chunks_para_a_busca_do_outro(conexao):
+    armazenador.indexar(
+        conexao,
+        documento_id=1,
+        chunks=[{"indice": 0, "pagina": 1, "texto": "O aluguel mensal e de tres mil reais."}],
+    )
+    armazenador.indexar(
+        conexao,
+        documento_id=2,
+        chunks=[{"indice": 0, "pagina": 4, "texto": "O distrato exige noventa dias de aviso."}],
+    )
+
+    resultado = buscar(conexao, [2], "valor do aluguel", limiar=2.0)
+
+    assert {r["documento_id"] for r in resultado} == {2}

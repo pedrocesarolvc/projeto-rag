@@ -47,15 +47,21 @@ class DocumentoResponse(BaseModel):
 
 
 class PerguntaRequest(BaseModel):
-    """Corpo de POST /perguntas."""
+    """
+    Corpo de POST /perguntas. Entre 1 e 2 documentos por pergunta: a
+    resposta junta o que vier de todos eles. O teto de 2 é uma escolha
+    do v1 (a busca e o prompt crescem com cada documento), não uma
+    limitação do desenho — subir é trocar este número.
+    """
 
-    documento_id: int
+    documento_ids: list[int] = Field(min_length=1, max_length=2)
     pergunta: str
 
 
 class Citacao(BaseModel):
     """Um chunk recuperado, exibido ao lado da resposta como fonte (Etapa 6, seção 6.6)."""
 
+    documento: str
     pagina: int
     texto: str
     distancia: float

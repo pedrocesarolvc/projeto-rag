@@ -79,10 +79,20 @@ def eh_dono(
     )
 
 
-def responder_pergunta(conexao, documento_id: int, pergunta: str) -> dict:
+def responder_pergunta(conexao, documentos: list[dict], pergunta: str) -> dict:
     """
     Roda a fase de consulta inteira: busca os chunks mais relevantes
-    (Etapa 5) e gera a resposta ancorada neles (Etapa 6).
+    em TODOS os `documentos` (Etapa 5) e gera a resposta ancorada
+    neles (Etapa 6).
+
+    `documentos` são os dicts de armazenador.buscar_documento() — a
+    rota já os buscou para checar o dono, então chegam prontos. A
+    Etapa 5 só devolve o `documento_id` de cada chunk (ela não conhece
+    a tabela `documentos`); é aqui, onde os dois mundos se encontram,
+    que o id vira o nome do arquivo que o prompt e a citação exibem.
     """
-    chunks = buscar(conexao, documento_id, pergunta)
+    nomes = {documento["id"]: documento["nome_original"] for documento in documentos}
+    chunks = buscar(conexao, list(nomes), pergunta)
+    for chunk in chunks:
+        chunk["documento"] = nomes[chunk["documento_id"]]
     return gerar_resposta(pergunta, chunks)

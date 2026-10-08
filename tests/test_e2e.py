@@ -103,7 +103,7 @@ def test_pergunta_com_resposta_conhecida_bate_e_cita_a_pagina_certa(conexao):
         resposta = client.post(
             "/perguntas",
             json={
-                "documento_id": documento["id"],
+                "documento_ids": [documento["id"]],
                 "pergunta": "com quantos dias de antecedencia o distrato deve ser comunicado?",
             },
             headers={"Authorization": f"Bearer {token}"},
@@ -128,7 +128,7 @@ def test_pergunta_fora_do_documento_admite_que_nao_sabe(conexao):
         resposta = client.post(
             "/perguntas",
             json={
-                "documento_id": documento["id"],
+                "documento_ids": [documento["id"]],
                 "pergunta": "qual a receita de lasanha?",
             },
             headers={"Authorization": f"Bearer {token}"},
@@ -192,3 +192,62 @@ def test_documento_anonimo_continua_acessivel_apos_login(conexao):
 
     assert resposta.status_code == 200
     assert resposta.json()["id"] == documento["id"]
+
+
+# --- dois documentos: a pergunta junta o que vem dos dois, e a citação separa a origem ---
+
+
+def _subir_pdf_com_texto(
+    client: TestClient, sessao_anonima_id: str, nome: str, texto: str
+) -> dict:
+    """Gera um PDF de uma página com `texto` e sobe como `nome`."""
+    import pymupdf
+
+    pdf = pymupdf.open()
+    pdf.new_page().insert_text((72, 72), texto)
+    conteudo = pdf.tobytes()
+
+    resposta = client.post(
+        "/documentos",
+        files={"arquivo": (nome, conteudo, "application/pdf")},
+        headers={"X-Sessao-Anonima": sessao_anonima_id},
+    )
+    assert resposta.status_code == 201
+    return resposta.json()
+
+
+def test_pergunta_sobre_dois_documentos_cita_os_dois_com_o_nome_de_cada(conexao):
+    """
+    Os dois PDFs falam do mesmo assunto (prazo do distrato) com
+    informações diferentes: a pergunta, feita sobre os dois de uma
+    vez, tem que trazer citações de ambos — cada uma dizendo de qual
+    arquivo veio. É o "juntar e separar" de ponta a ponta.
+    """
+    sessao = _sessao_anonima()
+    with TestClient(app) as client:
+        contrato = _subir_pdf_com_texto(
+            client,
+            sessao,
+            "contrato.pdf",
+            "O distrato devera ser comunicado com 90 dias de antecedencia.",
+        )
+        aditivo = _subir_pdf_com_texto(
+            client,
+            sessao,
+            "aditivo.pdf",
+            "Em caso de atraso no pagamento, o distrato podera ser comunicado com 30 dias de antecedencia.",
+        )
+        token = _registrar(client, "dois.documentos@exemplo.com", "senha12345", sessao)
+
+        resposta = client.post(
+            "/perguntas",
+            json={
+                "documento_ids": [contrato["id"], aditivo["id"]],
+                "pergunta": "com quantos dias de antecedencia o distrato deve ser comunicado?",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resposta.status_code == 200
+    documentos_citados = {c["documento"] for c in resposta.json()["citacoes"]}
+    assert documentos_citados == {"contrato.pdf", "aditivo.pdf"}

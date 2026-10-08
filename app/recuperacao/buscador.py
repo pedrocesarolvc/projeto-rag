@@ -31,21 +31,35 @@ LIMIAR_PADRAO = 0.65
 
 def buscar(
     conexao,
-    documento_id: int,
+    documento_ids: list[int],
     pergunta: str,
     k: int = K_PADRAO,
     limiar: float = LIMIAR_PADRAO,
 ) -> list[dict]:
     """
-    Vetoriza `pergunta`, pega os `k` chunks mais próximos dela dentro
-    de `documento_id`, e descarta os que passarem do `limiar` de
-    distância (seção 5.5) — o corte acontece depois do top-k, não no
-    lugar dele: um `LIMIT k` sozinho sempre devolve k chunks, mesmo
-    quando nenhum é relevante.
+    Vetoriza `pergunta` uma única vez, pega os `k` chunks mais
+    próximos dela dentro de CADA documento de `documento_ids`, junta
+    tudo e descarta os que passarem do `limiar` de distância (seção
+    5.5) — o corte acontece depois do top-k, não no lugar dele: um
+    `LIMIT k` sozinho sempre devolve k chunks, mesmo quando nenhum é
+    relevante.
 
-    Retorna o contrato da seção 5.9, ordenado por distância crescente:
+    O top-k é POR documento, não global, de propósito: num top-k único
+    sobre dois PDFs, o mais "falante" para aquela pergunta poderia
+    ocupar todas as vagas e esconder o outro — justamente o que
+    impediria juntar as informações dos dois. Com um documento só, o
+    comportamento é idêntico ao de antes. O limiar continua barrando
+    o que não tem a ver: se o assunto só existe num dos PDFs, só ele
+    contribui com chunks.
 
-        [{"pagina": 3, "texto": "...", "distancia": 0.18}, ...]
+    Retorna o contrato da seção 5.9 (agora com o documento de origem),
+    ordenado por distância crescente entre todos os documentos:
+
+        [{"documento_id": 7, "pagina": 3, "texto": "...", "distancia": 0.18}, ...]
+
+    O NOME do documento não vem daqui: esta etapa só conhece a tabela
+    `chunks`, não `documentos`. Quem chama (pipeline.py) já tem os
+    documentos em mãos e acrescenta o nome.
 
     Lista vazia é uma resposta válida — é o que permite à Etapa 6
     responder "não encontrei isso no documento" em vez de inventar.
@@ -59,21 +73,31 @@ def buscar(
     # contra um Postgres real.
     vetor_pergunta = Vector(gerar_embeddings([pergunta])[0])
 
+    chunks = []
     with conexao.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT pagina, texto, vetor <=> %s AS distancia
-            FROM chunks
-            WHERE documento_id = %s
-            ORDER BY vetor <=> %s
-            LIMIT %s
-            """,
-            (vetor_pergunta, documento_id, vetor_pergunta, k),
-        )
-        resultados = cursor.fetchall()
+        for documento_id in documento_ids:
+            cursor.execute(
+                """
+                SELECT pagina, texto, vetor <=> %s AS distancia
+                FROM chunks
+                WHERE documento_id = %s
+                ORDER BY vetor <=> %s
+                LIMIT %s
+                """,
+                (vetor_pergunta, documento_id, vetor_pergunta, k),
+            )
+            chunks.extend(
+                {
+                    "documento_id": documento_id,
+                    "pagina": pagina,
+                    "texto": texto,
+                    "distancia": distancia,
+                }
+                for pagina, texto, distancia in cursor.fetchall()
+                if distancia <= limiar
+            )
 
-    return [
-        {"pagina": pagina, "texto": texto, "distancia": distancia}
-        for pagina, texto, distancia in resultados
-        if distancia <= limiar
-    ]
+    # Cada consulta já vem ordenada, mas a junção de dois documentos
+    # não: reordena para que o mais próximo da pergunta venha primeiro,
+    # venha ele de onde vier.
+    return sorted(chunks, key=lambda chunk: chunk["distancia"])

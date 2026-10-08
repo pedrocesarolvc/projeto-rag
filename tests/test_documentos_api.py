@@ -129,11 +129,71 @@ def test_perguntar_sobre_documento_de_outro_usuario_devolve_404(conexao):
 
         resposta = client.post(
             "/perguntas",
-            json={"documento_id": documento["id"], "pergunta": "qualquer coisa"},
+            json={"documento_ids": [documento["id"]], "pergunta": "qualquer coisa"},
             headers={"Authorization": f"Bearer {token_estranho}"},
         )
 
     assert resposta.status_code == 404
+
+
+# --- pergunta com dois documentos: UM alheio derruba o pedido inteiro ---
+
+
+def test_pergunta_com_um_documento_proprio_e_um_alheio_devolve_404(conexao):
+    """
+    O ataque que a checagem por documento impede: usar o PDF que é seu
+    como "isca" para alcançar também o de outra pessoa. Basta um dos
+    ids falhar na posse para o pedido todo responder 404 — e a resposta
+    é a mesma de um id que nem existe, então nada vaza.
+    """
+    with TestClient(app) as client:
+        sessao_a = _sessao_anonima()
+        documento_alheio = _subir_documento(client, sessao_a)
+        _registrar(client, "dono.alheio@exemplo.com", "senha12345", sessao_a)
+
+        sessao_b = _sessao_anonima()
+        documento_proprio = _subir_documento(client, sessao_b)
+        token_b = _registrar(client, "dono.proprio@exemplo.com", "senha12345", sessao_b)
+
+        resposta = client.post(
+            "/perguntas",
+            json={
+                "documento_ids": [documento_proprio["id"], documento_alheio["id"]],
+                "pergunta": "qualquer coisa",
+            },
+            headers={"Authorization": f"Bearer {token_b}"},
+        )
+
+    assert resposta.status_code == 404
+
+
+# --- o teto de 2 documentos por pergunta é imposto pelo servidor ---
+
+
+def test_pergunta_com_tres_documentos_devolve_422(conexao):
+    with TestClient(app) as client:
+        token = _registrar(client, "tres.docs@exemplo.com", "senha12345")
+
+        resposta = client.post(
+            "/perguntas",
+            json={"documento_ids": [1, 2, 3], "pergunta": "qualquer coisa"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resposta.status_code == 422
+
+
+def test_pergunta_sem_nenhum_documento_devolve_422(conexao):
+    with TestClient(app) as client:
+        token = _registrar(client, "zero.docs@exemplo.com", "senha12345")
+
+        resposta = client.post(
+            "/perguntas",
+            json={"documento_ids": [], "pergunta": "qualquer coisa"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resposta.status_code == 422
 
 
 # --- DELETE /documentos/{id} de outro usuário: 404, e nada é removido ---

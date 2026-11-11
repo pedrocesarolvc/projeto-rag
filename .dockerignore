@@ -6,7 +6,11 @@
 __pycache__/
 *.pyc
 uploads/
+# Segredos reais nunca entram no contexto de build, nem por engano.
 .env
+.env.*
+!.env.example
+docker-compose.override.yml
 tests/
 docs/
 frontend/node_modules/

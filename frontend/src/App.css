@@ -1,40 +1,225 @@
-.pagina {
-  max-width: 640px;
-  margin: 0 auto;
-  padding: 48px 20px;
+/* ---------- layout: estante à esquerda, conversa à direita ---------- */
+
+.layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: 100vh;
 }
 
-h1 {
-  font-size: 28px;
-  margin: 0 0 8px;
+.conversa {
+  padding: 40px clamp(16px, 4vw, 56px) 64px;
+  max-width: 860px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ---------- estante e lombadas ---------- */
+
+.estante {
+  background: var(--painel);
+  border-right: 1px solid var(--borda);
+  padding: 28px 16px 24px;
+}
+
+.estante-titulo {
+  margin: 0 0 20px 12px;
+  font: 700 12px/1 var(--sans);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--latao);
+}
+
+/*
+  Cada linha da estante tem 230px: 216 de "vão" para os livros e 14 de
+  tábua. A tábua é desenhada por um gradiente que se repete a cada 190px,
+  então o número de linhas pode crescer sem nenhum elemento extra.
+*/
+.prateleira {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 6px;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 216px,
+    var(--madeira-2) 216px 228px,
+    #2b1d13 228px 230px
+  );
+}
+
+.lombada-slot {
+  height: 216px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.lombada {
+  --altura: 190px;
+  --cor: var(--madeira-1);
+  position: relative;
+  width: 40px;
+  height: var(--altura);
+  padding: 26px 0;
+  border: 0;
+  border-radius: 4px 4px 2px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f6efe4;
+  cursor: pointer;
+  /* o brilho nas bordas dá a ideia de lombada arredondada */
+  background:
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.3),
+      rgba(255, 255, 255, 0.07) 18%,
+      rgba(0, 0, 0, 0) 50%,
+      rgba(0, 0, 0, 0.24)
+    ),
+    var(--cor);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+/* as duas faixas de latão no topo e no pé, como numa encadernação */
+.lombada::before,
+.lombada::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--latao);
+  opacity: 0.85;
+}
+.lombada::before {
+  top: 10px;
+}
+.lombada::after {
+  bottom: 10px;
+}
+
+.lombada-textos {
+  display: flex;
+  gap: 6px;
+}
+
+.lombada-texto {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font: 600 13px/1 var(--serif);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: calc(var(--altura) - 52px);
+}
+
+/* dois livros numa conversa só: lombada mais larga, uma coluna por nome */
+.lombada-dupla {
+  width: 58px;
+}
+.lombada-dupla .lombada-texto {
+  font-size: 12px;
+}
+
+.lombada:hover:not(:disabled) {
+  transform: translateY(-4px);
+}
+
+.lombada[aria-current="true"] {
+  transform: translateY(-12px);
+  box-shadow:
+    0 0 0 2px var(--latao),
+    0 12px 20px rgba(0, 0, 0, 0.5);
+}
+
+.lombada:disabled {
+  cursor: default;
+}
+
+/* a conversa ainda sem documento: um espaço reservado, não um livro */
+.lombada-vazia {
+  background: transparent;
+  border: 2px dashed var(--borda);
+  color: var(--texto-suave);
+}
+.lombada-vazia::before,
+.lombada-vazia::after {
+  display: none;
+}
+
+.nova-conversa {
+  margin: 20px 12px 0;
+  width: calc(100% - 24px);
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--latao);
+  border: 1px solid var(--latao);
+  border-radius: 8px;
+  font: 600 14px/1 var(--sans);
+  cursor: pointer;
+}
+.nova-conversa:hover:not(:disabled) {
+  background: rgba(201, 162, 74, 0.1);
+}
+.nova-conversa:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.estante-nota {
+  margin: 14px 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--texto-suave);
+}
+
+/* ---------- cabeçalho ---------- */
+
+.conversa h1 {
+  font: 700 36px/1.1 var(--serif);
+  margin: 0 0 10px;
+  letter-spacing: 0.01em;
+}
+
+.conversa h1::after {
+  content: "";
+  display: block;
+  width: 56px;
+  height: 3px;
+  margin-top: 12px;
+  background: var(--latao);
+  border-radius: 2px;
 }
 
 .subtitulo {
-  color: var(--text-muted, #666);
+  color: var(--texto-suave);
   margin: 0 0 32px;
+  max-width: 56ch;
 }
 
+/* ---------- cartões ---------- */
+
 .cartao {
-  border: 1px solid var(--border, #ddd);
-  border-radius: 8px;
-  padding: 16px;
+  background: var(--painel);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  padding: 18px;
   margin-bottom: 16px;
 }
 
-.upload {
-  display: block;
-  cursor: pointer;
-  text-align: center;
-  padding: 12px;
-}
-
-.upload input {
-  display: none;
+/* o filete de madeira marca o cartão onde os documentos moram */
+.cartao-documentos {
+  border-top: 4px solid var(--madeira-2);
 }
 
 .lista-documentos {
   list-style: none;
-  margin: 0 0 8px;
+  margin: 0 0 14px;
   padding: 0;
 }
 
@@ -42,95 +227,267 @@ h1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding: 4px 0;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--borda);
+}
+.lista-documentos li:last-child {
+  border-bottom: 0;
 }
 
-.lista-documentos input {
-  margin-right: 8px;
+.doc-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.doc-item input {
+  accent-color: var(--latao);
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.doc-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selo {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 12px;
+  font-weight: 600;
+}
+.selo-pronto {
+  color: var(--verde-seguro);
+}
+.selo-indexando {
+  color: var(--latao);
+}
+.selo-falhou {
+  color: var(--erro);
 }
 
 .remover {
+  flex: none;
   background: none;
   border: none;
-  color: var(--text-muted, #666);
+  color: var(--texto-suave);
   text-decoration: underline;
   cursor: pointer;
   font-size: 14px;
 }
+.remover:hover:not(:disabled) {
+  color: var(--texto);
+}
+
+/* o <input type=file> fica invisível, mas continua focável pelo teclado */
+.upload {
+  position: relative;
+  display: block;
+  cursor: pointer;
+  text-align: center;
+  padding: 22px 12px;
+  border: 2px dashed var(--latao);
+  border-radius: 10px;
+  color: var(--latao);
+  font-weight: 600;
+}
+.upload:hover,
+.upload:focus-within {
+  background: rgba(201, 162, 74, 0.08);
+}
+.upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  cursor: pointer;
+}
+.upload-dica {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+/* ---------- pergunta ---------- */
 
 .form-pergunta {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .form-pergunta input {
   flex: 1;
-  padding: 8px 12px;
-  font-size: 16px;
+  min-width: 0;
 }
 
-.form-pergunta button {
-  padding: 8px 16px;
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  padding: 12px 14px;
+  font: 16px var(--sans);
+  color: var(--texto);
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+}
+input[type="text"]::placeholder,
+input[type="email"]::placeholder,
+input[type="password"]::placeholder {
+  color: var(--texto-suave);
+  opacity: 0.8;
+}
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus {
+  border-color: var(--latao);
+}
+
+.form-pergunta button,
+.form-auth button[type="submit"] {
+  padding: 12px 20px;
+  background: var(--latao);
+  color: var(--latao-escuro);
+  border: 0;
+  border-radius: 10px;
+  font: 700 15px/1 var(--sans);
   cursor: pointer;
+}
+.form-pergunta button:hover:not(:disabled),
+.form-auth button[type="submit"]:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.form-pergunta button:disabled,
+.form-auth button[type="submit"]:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .erro {
-  color: #c0392b;
+  color: var(--erro);
+}
+
+/* ---------- cadastro / login ---------- */
+
+.auth {
+  border-top: 4px solid var(--verde-seguro);
 }
 
 .auth-explicacao {
-  margin: 0 0 12px;
+  margin: 0 0 14px;
 }
 
 .form-auth {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.form-auth input {
-  padding: 8px 12px;
-  font-size: 16px;
-}
-
-.form-auth button {
-  padding: 8px 16px;
-  cursor: pointer;
+  gap: 10px;
 }
 
 .auth-alternar {
   background: none;
   border: none;
-  padding: 12px 0 0;
-  color: var(--text-muted, #666);
+  padding: 14px 0 0;
+  color: var(--latao);
   text-decoration: underline;
   cursor: pointer;
   font-size: 14px;
 }
 
+/* ---------- resposta e fontes ---------- */
+
+.resposta {
+  border-left: 4px solid var(--verde-seguro);
+}
+
+.selo-seguro {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--verde-seguro);
+  font: 700 12px/1 var(--sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .texto-resposta {
-  font-size: 17px;
-  line-height: 1.5;
+  font: 18px/1.6 var(--serif);
   white-space: pre-wrap;
+  margin: 0;
 }
 
 .citacoes h2 {
-  font-size: 14px;
+  font: 700 12px/1 var(--sans);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted, #666);
-  margin: 24px 0 8px;
+  letter-spacing: 0.14em;
+  color: var(--latao);
+  margin: 28px 0 12px;
 }
 
 .citacao {
-  border-left: 3px solid var(--border, #ddd);
   margin: 0 0 12px;
-  padding: 4px 0 4px 12px;
+  padding: 10px 14px;
   font-size: 14px;
+  background: rgba(122, 85, 56, 0.22);
+  border-left: 3px solid var(--madeira-3);
+  border-radius: 0 8px 8px 0;
+}
+.citacao p {
+  margin: 0;
+}
+.citacao footer {
+  margin-top: 8px;
+  color: var(--latao);
+  font-weight: 600;
+  font-size: 13px;
 }
 
-.citacao footer {
-  color: var(--text-muted, #666);
-  margin-top: 4px;
+/* ---------- celular: a estante vira uma faixa no topo ---------- */
+
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .estante {
+    border-right: 0;
+    border-bottom: 1px solid var(--borda);
+    padding: 20px 8px 16px;
+  }
+
+  .prateleira {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-top: 12px;
+    background: linear-gradient(
+      to bottom,
+      transparent 0 228px,
+      var(--madeira-2) 228px 240px,
+      #2b1d13 240px 242px
+    );
+  }
+
+  .lombada-slot {
+    flex: none;
+    height: 216px;
+  }
+
+  .estante-nota {
+    display: none;
+  }
+
+  .conversa {
+    padding-top: 28px;
+  }
+
+  .form-pergunta {
+    flex-direction: column;
+  }
 }

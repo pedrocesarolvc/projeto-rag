@@ -1,31 +1,54 @@
+/*
+  Identidade visual do Lastro: tons frios (azul-ardósia) como fundo,
+  madeira nas lombadas e nos filetes, latão como destaque de ação e
+  verde-petróleo como sinal de "verificado/seguro".
+
+  Os pares texto/fundo foram escolhidos para passar de 4.5:1 (WCAG AA):
+  o texto claro só vai sobre fundos escuros, e o latão e o verde, que
+  são claros, só vão sobre as superfícies azul-ardósia.
+*/
 :root {
-  --text: #24242b;
-  --text-muted: #666;
-  --bg: #fff;
-  --border: #ddd;
+  --fundo: #121c26;
+  --painel: #1a2836;
+  --painel-2: #213345;
+  --borda: #2f4357;
+
+  --texto: #f1ebe2;
+  --texto-suave: #aebbc7;
+
+  --latao: #c9a24a;
+  --latao-escuro: #1b1407;
+  --verde-seguro: #5bb5a8;
+  --erro: #ff8f7a;
+
+  --madeira-1: #4a3324;
+  --madeira-2: #7a5538;
+  --madeira-3: #a47c55;
+
+  --serif: Georgia, "Times New Roman", serif;
   --sans: system-ui, "Segoe UI", Roboto, sans-serif;
 
-  font: 16px/145% var(--sans);
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #e5e5e5;
-    --text-muted: #999;
-    --bg: #17181c;
-    --border: #333;
-  }
+  font: 16px/150% var(--sans);
+  color-scheme: dark;
+  color: var(--texto);
+  background: var(--fundo);
 }
 
 body {
   margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(91, 181, 168, 0.07), transparent 60%),
+    var(--fundo);
 }
 
 h1,
 h2 {
-  color: var(--text);
+  color: var(--texto);
   font-weight: 600;
+}
+
+*:focus-visible {
+  outline: 3px solid var(--verde-seguro);
+  outline-offset: 2px;
 }

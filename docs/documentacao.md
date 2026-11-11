@@ -1028,7 +1028,14 @@ Ao redor delas, as rotas de conta:
 | `POST` | `/auth/registrar` | Cria a conta e adota os documentos da sessão anônima |
 | `POST` | `/auth/login` | Autentica e adota os documentos da sessão anônima |
 | `GET` | `/documentos` | Lista os documentos do usuário (ou da sessão anônima) |
-| `DELETE` | `/documentos/{id}` | Remove o documento e os dados dele derivados |
+| `DELETE` | `/documentos/{id}` | Remove o documento e os dados dele derivados; tira o documento das conversas, e uma que fique sem nenhum some junto |
+| `POST` | `/conversas` | Abre uma conversa com 1 ou 2 documentos do usuário |
+| `GET` | `/conversas` | Lista as conversas do usuário — as lombadas da estante |
+| `GET` | `/conversas/{id}` | A conversa com o histórico de mensagens |
+| `POST` | `/conversas/{id}/documentos` | Acrescenta um documento à conversa (teto de 2) |
+| `DELETE` | `/conversas/{id}` | Apaga a conversa, as mensagens e os documentos que só ela usava |
+
+**Conversas.** Cada assunto é uma conversa, e a interface a mostra como a lombada de um livro, com o nome dos PDFs como título. Todas as rotas de conversa exigem conta; a conversa nasce na primeira pergunta, e `POST /perguntas` aceita um `conversa_id` para continuar uma existente (sem ele, abre uma nova com os documentos pedidos). Conversa de outro usuário responde `404`, como documento de outro usuário. O histórico serve para o usuário reler: **cada pergunta continua independente das anteriores**, e nada dele entra no prompt — fazer o modelo carregar a conversa mudaria justamente o grounding, que é o que o Lastro garante. As citações ficam gravadas dentro de cada mensagem, e não como referência aos chunks, para o histórico sobreviver à remoção de um documento.
 
 `POST /perguntas` recebe `documento_ids` (de 1 a 2) e a pergunta; a resposta junta o que vier de todos os documentos pedidos, e cada citação diz de qual arquivo veio. A posse é conferida em **cada** id, e basta um falhar para o pedido inteiro responder `404`: sem isso, um PDF seu serviria de isca para alcançar o de outra pessoa. Mais de 2 ids, ou nenhum, é `422` — o teto é uma escolha do v1, não do desenho.
 

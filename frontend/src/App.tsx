@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -7,12 +8,21 @@ import {
   type ReactNode,
 } from "react";
 import {
+  acrescentarDocumento,
+  apagarConversa,
+  criarConversa,
   enviarDocumento,
+  limparToken,
+  listarConversas,
+  obterConversa,
+  obterToken,
   perguntar,
   removerDocumento,
   ErroAutenticacao,
+  type Citacao,
+  type ConversaResumo,
   type Documento,
-  type Resposta,
+  type Mensagem,
 } from "./api";
 import Auth from "./Auth";
 import "./App.css";
@@ -21,37 +31,59 @@ import "./App.css";
 // estante: o nome dos PDFs enviados é o título do livro. O fluxo dentro
 // de uma conversa é o de sempre — enviar até 2 PDFs, perguntar (conta
 // exigida só aqui, cadastro adiado, seção 1.5), ler a resposta com as
-// fontes.
+// fontes — e agora o histórico fica guardado no servidor: ao voltar, a
+// estante e as conversas estão onde foram deixadas.
 //
-// Por enquanto as conversas só existem em memória, nesta janela: o
-// servidor ainda não guarda histórico. Cada pergunta continua
-// independente das anteriores (o Lastro não "lembra" da conversa) —
-// de propósito, para não mexer em como o prompt é montado, que é onde
-// mora o grounding.
+// Uma conversa só passa a existir no servidor na primeira pergunta,
+// porque ela exige login. Até lá é um rascunho local (`servidorId`
+// nulo) com os PDFs já enviados.
+//
+// Cada pergunta continua independente das anteriores: o histórico é só
+// para o usuário reler, o Lastro não "lembra" da conversa ao responder.
+// De propósito — o prompt é onde mora o grounding, e fazer o modelo
+// carregar a conversa mudaria justamente isso.
 
 // Até 2 PDFs por pergunta: a resposta junta o que vier dos dois, e a
 // caixa de seleção de cada um permite separá-los quando preciso. O teto
-// espelha o do servidor (PerguntaRequest.documento_ids) — o servidor é
-// quem de fato impõe; aqui ele só evita oferecer o que seria recusado.
+// espelha o do servidor — o servidor é quem de fato impõe; aqui ele só
+// evita oferecer o que seria recusado.
 const MAX_DOCUMENTOS = 2;
 
-// A cor e a altura da lombada saem do id da conversa, não da posição na
-// estante: assim um livro não muda de aspecto quando outro é removido.
+// A cor e a altura da lombada saem da identidade da conversa, não da
+// posição na estante: assim um livro não muda de aspecto quando outro é
+// removido.
 const CORES_LOMBADA = ["#4a3324", "#2e4a5f", "#5a3e2b", "#2f4f46", "#6b4a33", "#3b3f5c"];
 const ALTURAS_LOMBADA = [190, 172, 182, 166, 178, 170];
 
+// Rascunhos locais usam 1, 2, 3…; as conversas do servidor usam
+// DESLOCAMENTO_SERVIDOR + id, para as duas numerações nunca se cruzarem.
+const DESLOCAMENTO_SERVIDOR = 1_000_000;
+
 interface Conversa {
-  id: number;
+  chave: number;
+  servidorId: number | null;
   documentos: Documento[];
   // Quais documentos entram na próxima pergunta. Todo upload novo já
   // nasce marcado — o caso comum é querer perguntar sobre tudo.
   selecionados: number[];
   pergunta: string;
-  resposta: Resposta | null;
+  // null = conversa do servidor cujas mensagens ainda não foram buscadas.
+  mensagens: Mensagem[] | null;
 }
 
-function novaConversa(id: number): Conversa {
-  return { id, documentos: [], selecionados: [], pergunta: "", resposta: null };
+function novaConversa(chave: number): Conversa {
+  return { chave, servidorId: null, documentos: [], selecionados: [], pergunta: "", mensagens: [] };
+}
+
+function daServidor(resumo: ConversaResumo): Conversa {
+  return {
+    chave: DESLOCAMENTO_SERVIDOR + resumo.id,
+    servidorId: resumo.id,
+    documentos: resumo.documentos,
+    selecionados: resumo.documentos.filter((doc) => doc.status === "pronto").map((doc) => doc.id),
+    pergunta: "",
+    mensagens: null,
+  };
 }
 
 // A LLM costuma responder com **negrito** e *itálico* em Markdown. Em
@@ -88,11 +120,42 @@ function tituloDaConversa(conversa: Conversa): string {
   return conversa.documentos.map((doc) => semExtensao(doc.nome_original)).join(" e ");
 }
 
+function RespostaCard({ texto, citacoes }: { texto: string; citacoes: Citacao[] }) {
+  return (
+    <section className="cartao resposta">
+      <p className="selo-seguro">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true">
+          <rect x="4" y="11" width="16" height="10" rx="2" />
+          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        </svg>
+        Fundamentada nos documentos
+      </p>
+      <p className="texto-resposta">{comEnfase(texto)}</p>
+
+      {citacoes.length > 0 && (
+        <div className="citacoes">
+          <h2>Fontes</h2>
+          {citacoes.map((citacao, indice) => (
+            <blockquote key={indice} className="citacao">
+              <p>{citacao.texto}</p>
+              <footer>
+                {citacao.documento} · página {citacao.pagina}
+              </footer>
+            </blockquote>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function App() {
   const [conversas, setConversas] = useState<Conversa[]>([novaConversa(1)]);
-  const [ativaId, setAtivaId] = useState(1);
-  const proximoId = useRef(2);
+  const [ativaChave, setAtivaChave] = useState(1);
+  const proximaChave = useRef(2);
+  const fimDaConversa = useRef<HTMLDivElement>(null);
 
+  const [logado, setLogado] = useState(() => obterToken() !== null);
   const [enviando, setEnviando] = useState(false);
   const [perguntando, setPerguntando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -100,7 +163,7 @@ function App() {
   // devolve 401 — nenhuma outra rota dispara isso (seção 7.2).
   const [precisaAutenticar, setPrecisaAutenticar] = useState(false);
 
-  const ativa = conversas.find((c) => c.id === ativaId) ?? conversas[0];
+  const ativa = conversas.find((c) => c.chave === ativaChave) ?? conversas[0];
   // Trocar de conversa no meio de um envio faria a resposta cair no
   // lugar errado; enquanto algo está em andamento, a estante espera.
   const ocupado = enviando || perguntando;
@@ -111,20 +174,69 @@ function App() {
     .filter((doc) => doc.status === "pronto" && ativa.selecionados.includes(doc.id))
     .map((doc) => doc.id);
 
-  function atualizarConversa(id: number, mudar: (conversa: Conversa) => Conversa) {
-    setConversas((atuais) => atuais.map((c) => (c.id === id ? mudar(c) : c)));
+  function atualizarConversa(chave: number, mudar: (conversa: Conversa) => Conversa) {
+    setConversas((atuais) => atuais.map((c) => (c.chave === chave ? mudar(c) : c)));
   }
 
-  function selecionarConversa(id: number) {
-    setAtivaId(id);
+  // As conversas guardadas no servidor entram na estante, antes dos
+  // rascunhos locais. Quem já está na estante não é duplicado.
+  async function carregarConversas() {
+    try {
+      const lista = await listarConversas();
+      setConversas((atuais) => {
+        const jaTem = new Set(atuais.map((c) => c.servidorId));
+        const novas = lista.filter((r) => !jaTem.has(r.id)).map(daServidor);
+        return [...novas, ...atuais];
+      });
+    } catch (e) {
+      // 401 aqui só quer dizer "token vencido": segue como quem ainda
+      // não tem conta, sem abrir a tela de cadastro (ela é da pergunta).
+      if (e instanceof ErroAutenticacao) {
+        limparToken();
+        setLogado(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (obterToken() !== null) carregarConversas();
+    // só na carga da página
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ao abrir uma conversa nova ou ao chegar uma resposta, desce até o fim.
+  useEffect(() => {
+    fimDaConversa.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [ativa.chave, ativa.mensagens?.length]);
+
+  async function carregarMensagens(chave: number, servidorId: number) {
+    try {
+      const detalhe = await obterConversa(servidorId);
+      atualizarConversa(chave, (c) => ({
+        ...c,
+        documentos: detalhe.documentos,
+        mensagens: detalhe.mensagens,
+      }));
+    } catch (e) {
+      atualizarConversa(chave, (c) => ({ ...c, mensagens: [] }));
+      setErro(e instanceof Error ? e.message : "Falha ao abrir a conversa.");
+    }
+  }
+
+  function selecionarConversa(chave: number) {
+    setAtivaChave(chave);
     setErro(null);
     setPrecisaAutenticar(false);
+    const alvo = conversas.find((c) => c.chave === chave);
+    if (alvo && alvo.servidorId !== null && alvo.mensagens === null) {
+      carregarMensagens(alvo.chave, alvo.servidorId);
+    }
   }
 
   function handleNovaConversa() {
-    const id = proximoId.current++;
-    setConversas((atuais) => [...atuais, novaConversa(id)]);
-    selecionarConversa(id);
+    const chave = proximaChave.current++;
+    setConversas((atuais) => [...atuais, novaConversa(chave)]);
+    selecionarConversa(chave);
   }
 
   async function handleArquivo(evento: ChangeEvent<HTMLInputElement>) {
@@ -134,16 +246,29 @@ function App() {
     evento.target.value = "";
     if (!arquivo) return;
 
-    const conversaId = ativa.id;
+    const conversa = ativa;
     setEnviando(true);
     setErro(null);
     try {
       const doc = await enviarDocumento(arquivo);
-      atualizarConversa(conversaId, (c) => ({
+      let documentos = [...conversa.documentos, doc];
+
+      // Numa conversa que já existe no servidor, o PDF novo precisa ser
+      // ligado a ela ali também — é o "ampliar o conhecimento". Se a
+      // ligação falhar, o PDF recém-enviado não fica solto no servidor.
+      if (conversa.servidorId !== null) {
+        try {
+          documentos = (await acrescentarDocumento(conversa.servidorId, doc.id)).documentos;
+        } catch (e) {
+          await removerDocumento(doc.id).catch(() => undefined);
+          throw e;
+        }
+      }
+
+      atualizarConversa(conversa.chave, (c) => ({
         ...c,
-        documentos: [...c.documentos, doc],
+        documentos,
         selecionados: [...c.selecionados, doc.id],
-        resposta: null,
       }));
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao enviar o documento.");
@@ -153,12 +278,26 @@ function App() {
   }
 
   function alternarSelecao(docId: number) {
-    atualizarConversa(ativa.id, (c) => ({
+    atualizarConversa(ativa.chave, (c) => ({
       ...c,
       selecionados: c.selecionados.includes(docId)
         ? c.selecionados.filter((outro) => outro !== docId)
         : [...c.selecionados, docId],
     }));
+  }
+
+  // Tira a conversa da estante. Se era a última, nasce um rascunho vazio
+  // no lugar: a tela nunca fica sem uma conversa onde enviar PDFs.
+  function tirarDaEstante(chave: number) {
+    const outras = conversas.filter((c) => c.chave !== chave);
+    if (outras.length === 0) {
+      const nova = novaConversa(proximaChave.current++);
+      setConversas([nova]);
+      setAtivaChave(nova.chave);
+      return;
+    }
+    setConversas(outras);
+    selecionarConversa(outras[outras.length - 1].chave);
   }
 
   // Com o teto de 2, sem remover não haveria como trocar um PDF por
@@ -173,19 +312,34 @@ function App() {
     }
 
     const restantes = ativa.documentos.filter((doc) => doc.id !== docId);
-    if (restantes.length === 0 && conversas.length > 1) {
-      // Livro sem nenhum documento não tem título: sai da estante.
-      const outras = conversas.filter((c) => c.id !== ativa.id);
-      setConversas(outras);
-      selecionarConversa(outras[outras.length - 1].id);
+    if (restantes.length === 0) {
+      // Livro sem nenhum documento não tem título: o servidor também o apagou.
+      tirarDaEstante(ativa.chave);
       return;
     }
-    atualizarConversa(ativa.id, (c) => ({
+    atualizarConversa(ativa.chave, (c) => ({
       ...c,
       documentos: restantes,
       selecionados: c.selecionados.filter((outro) => outro !== docId),
-      resposta: null,
     }));
+  }
+
+  async function handleApagarConversa() {
+    if (!window.confirm("Apagar esta conversa e os documentos dela? Isso não pode ser desfeito.")) return;
+
+    setErro(null);
+    try {
+      if (ativa.servidorId !== null) {
+        await apagarConversa(ativa.servidorId);
+      } else {
+        // um rascunho não existe no servidor, mas os PDFs dele existem
+        for (const doc of ativa.documentos) await removerDocumento(doc.id);
+      }
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Falha ao apagar a conversa.");
+      return;
+    }
+    tirarDaEstante(ativa.chave);
   }
 
   // Separada de handlePergunta para poder ser chamada de novo, sozinha,
@@ -194,12 +348,29 @@ function App() {
   async function enviarPergunta(texto: string) {
     if (idsParaPerguntar.length === 0 || !texto.trim()) return;
 
-    const conversaId = ativa.id;
+    const conversa = ativa;
     setPerguntando(true);
     setErro(null);
     try {
-      const r = await perguntar(idsParaPerguntar, texto);
-      atualizarConversa(conversaId, (c) => ({ ...c, resposta: r }));
+      // A primeira pergunta de um rascunho é o que o transforma em
+      // conversa de verdade. Ela nasce com TODOS os PDFs, marcados ou
+      // não: um PDF desmarcado agora também pertence ao livro.
+      let servidorId = conversa.servidorId;
+      if (servidorId === null) {
+        servidorId = (await criarConversa(conversa.documentos.map((doc) => doc.id))).id;
+        const idCriado = servidorId;
+        atualizarConversa(conversa.chave, (c) => ({ ...c, servidorId: idCriado }));
+      }
+
+      const resposta = await perguntar(idsParaPerguntar, texto, servidorId);
+      atualizarConversa(conversa.chave, (c) => ({
+        ...c,
+        pergunta: "",
+        mensagens: [
+          ...(c.mensagens ?? []),
+          { pergunta: texto, resposta: resposta.resposta, citacoes: resposta.citacoes },
+        ],
+      }));
     } catch (e) {
       if (e instanceof ErroAutenticacao) {
         setPrecisaAutenticar(true);
@@ -216,8 +387,12 @@ function App() {
     enviarPergunta(ativa.pergunta);
   }
 
-  function handleAutenticado() {
+  async function handleAutenticado() {
+    setLogado(true);
     setPrecisaAutenticar(false);
+    // Primeiro a estante, depois a pergunta: a conversa que a pergunta
+    // vai criar ainda não existe aqui, então a lista não a duplica.
+    await carregarConversas();
     enviarPergunta(ativa.pergunta);
   }
 
@@ -231,19 +406,19 @@ function App() {
             const titulo = tituloDaConversa(conversa);
             const linhas = linhasDaLombada(conversa);
             const estilo = {
-              "--cor": CORES_LOMBADA[conversa.id % CORES_LOMBADA.length],
-              "--altura": `${ALTURAS_LOMBADA[conversa.id % ALTURAS_LOMBADA.length]}px`,
+              "--cor": CORES_LOMBADA[conversa.chave % CORES_LOMBADA.length],
+              "--altura": `${ALTURAS_LOMBADA[conversa.chave % ALTURAS_LOMBADA.length]}px`,
             } as CSSProperties;
             return (
-              <li key={conversa.id} className="lombada-slot">
+              <li key={conversa.chave} className="lombada-slot">
                 <button
                   type="button"
                   className={`lombada${conversa.documentos.length === 0 ? " lombada-vazia" : ""}${conversa.documentos.length > 1 ? " lombada-dupla" : ""}`}
                   style={estilo}
                   title={conversa.documentos.map((doc) => doc.nome_original).join(" e ") || titulo}
                   aria-label={`Conversa: ${titulo}`}
-                  aria-current={conversa.id === ativa.id ? "true" : undefined}
-                  onClick={() => selecionarConversa(conversa.id)}
+                  aria-current={conversa.chave === ativa.chave ? "true" : undefined}
+                  onClick={() => selecionarConversa(conversa.chave)}
                   disabled={ocupado}
                 >
                   <span className="lombada-textos">
@@ -268,9 +443,12 @@ function App() {
         >
           + Nova conversa
         </button>
-        <p className="estante-nota">
-          Por enquanto, as conversas duram até você recarregar a página.
-        </p>
+        {!logado && (
+          <p className="estante-nota">
+            Suas conversas ficam guardadas depois que você criar uma conta, ao fazer a primeira
+            pergunta.
+          </p>
+        )}
       </aside>
 
       <main className="conversa">
@@ -279,6 +457,15 @@ function App() {
           Converse com até dois PDFs: respostas fundamentadas nos documentos, com o trecho, o arquivo e a
           página de origem.
         </p>
+
+        {ativa.documentos.length > 0 && (
+          <div className="conversa-cabecalho">
+            <h2 className="conversa-titulo">{tituloDaConversa(ativa)}</h2>
+            <button type="button" className="apagar" onClick={handleApagarConversa} disabled={ocupado}>
+              apagar conversa
+            </button>
+          </div>
+        )}
 
         <section className="cartao cartao-documentos">
           {ativa.documentos.length > 0 && (
@@ -330,6 +517,17 @@ function App() {
           )}
         </section>
 
+        {ativa.mensagens === null && !erro && <p className="carregando">Abrindo a conversa…</p>}
+
+        {(ativa.mensagens ?? []).map((mensagem, indice) => (
+          <article key={indice} className="mensagem">
+            <p className="mensagem-pergunta">{mensagem.pergunta}</p>
+            <RespostaCard texto={mensagem.resposta} citacoes={mensagem.citacoes} />
+          </article>
+        ))}
+
+        {precisaAutenticar && <Auth onAutenticado={handleAutenticado} />}
+
         {idsParaPerguntar.length > 0 && !precisaAutenticar && (
           <section className="cartao">
             <form onSubmit={handlePergunta} className="form-pergunta">
@@ -338,7 +536,7 @@ function App() {
                 value={ativa.pergunta}
                 onChange={(e) => {
                   const texto = e.target.value;
-                  atualizarConversa(ativa.id, (c) => ({ ...c, pergunta: texto }));
+                  atualizarConversa(ativa.chave, (c) => ({ ...c, pergunta: texto }));
                 }}
                 placeholder="Qual é o prazo de rescisão?"
                 aria-label="Sua pergunta"
@@ -351,36 +549,9 @@ function App() {
           </section>
         )}
 
-        {precisaAutenticar && <Auth onAutenticado={handleAutenticado} />}
-
         {erro && <p className="erro">{erro}</p>}
 
-        {ativa.resposta && (
-          <section className="cartao resposta">
-            <p className="selo-seguro">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true">
-                <rect x="4" y="11" width="16" height="10" rx="2" />
-                <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-              </svg>
-              Fundamentada nos documentos
-            </p>
-            <p className="texto-resposta">{comEnfase(ativa.resposta.resposta)}</p>
-
-            {ativa.resposta.citacoes.length > 0 && (
-              <div className="citacoes">
-                <h2>Fontes</h2>
-                {ativa.resposta.citacoes.map((citacao, indice) => (
-                  <blockquote key={indice} className="citacao">
-                    <p>{citacao.texto}</p>
-                    <footer>
-                      {citacao.documento} · página {citacao.pagina}
-                    </footer>
-                  </blockquote>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
+        <div ref={fimDaConversa} />
       </main>
     </div>
   );

@@ -20,6 +20,24 @@ export interface Citacao {
 export interface Resposta {
   resposta: string;
   citacoes: Citacao[];
+  conversa_id: number;
+}
+
+// Uma pergunta e a resposta dela, como ficam gravadas na conversa.
+export interface Mensagem {
+  pergunta: string;
+  resposta: string;
+  citacoes: Citacao[];
+}
+
+// Uma conversa na estante: os documentos dela dão o título da lombada.
+export interface ConversaResumo {
+  id: number;
+  documentos: Documento[];
+}
+
+export interface ConversaDetalhe extends ConversaResumo {
+  mensagens: Mensagem[];
 }
 
 // --- sessão anônima e token (cadastro adiado, seção 1.5) ---
@@ -49,6 +67,12 @@ export function obterToken(): string | null {
 
 export function salvarToken(token: string): void {
   localStorage.setItem(CHAVE_TOKEN, token);
+}
+
+// Para um token que o servidor deixou de aceitar (expirou): guardá-lo
+// só faria toda carga de página falhar com 401.
+export function limparToken(): void {
+  localStorage.removeItem(CHAVE_TOKEN);
 }
 
 function cabecalhosAuth(): HeadersInit {
@@ -115,15 +139,55 @@ export async function removerDocumento(documentoId: number): Promise<void> {
 
 // A pergunta vale para todos os documentos da lista (o servidor limita
 // a 2): a resposta junta o que vier de cada um.
-export async function perguntar(documentoIds: number[], pergunta: string): Promise<Resposta> {
+export async function perguntar(
+  documentoIds: number[],
+  pergunta: string,
+  conversaId: number,
+): Promise<Resposta> {
   const resposta = await fetch("/perguntas", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...cabecalhosAuth() },
-    body: JSON.stringify({ documento_ids: documentoIds, pergunta }),
+    body: JSON.stringify({ documento_ids: documentoIds, pergunta, conversa_id: conversaId }),
   });
   if (!resposta.ok) await tratarErro(resposta);
   return resposta.json();
 }
+
+// --- conversas (as lombadas da estante) ---
+//
+// Só existem para quem tem conta: todas respondem 401 sem login. Quem
+// as chama na carga da página trata esse 401 como "ainda não há
+// conversas", e não como motivo para abrir a tela de cadastro — só a
+// primeira pergunta faz isso (seção 7.2).
+
+async function pedirJson<T>(caminho: string, opcoes: RequestInit = {}): Promise<T> {
+  const resposta = await fetch(caminho, {
+    ...opcoes,
+    headers: { "Content-Type": "application/json", ...cabecalhosAuth() },
+  });
+  if (!resposta.ok) await tratarErro(resposta);
+  return resposta.status === 204 ? (undefined as T) : resposta.json();
+}
+
+// Cria a conversa com TODOS os documentos, não só os marcados na hora:
+// um PDF desmarcado também pertence ao livro.
+export const criarConversa = (documentoIds: number[]) =>
+  pedirJson<ConversaResumo>("/conversas", {
+    method: "POST",
+    body: JSON.stringify({ documento_ids: documentoIds }),
+  });
+
+export const listarConversas = () => pedirJson<ConversaResumo[]>("/conversas");
+
+export const obterConversa = (id: number) => pedirJson<ConversaDetalhe>(`/conversas/${id}`);
+
+export const apagarConversa = (id: number) => pedirJson<void>(`/conversas/${id}`, { method: "DELETE" });
+
+export const acrescentarDocumento = (conversaId: number, documentoId: number) =>
+  pedirJson<ConversaResumo>(`/conversas/${conversaId}/documentos`, {
+    method: "POST",
+    body: JSON.stringify({ documento_id: documentoId }),
+  });
 
 // --- conta (Etapa 7, seção 7.3) ---
 

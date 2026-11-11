@@ -56,6 +56,22 @@ class PerguntaRequest(BaseModel):
 
     documento_ids: list[int] = Field(min_length=1, max_length=2)
     pergunta: str
+    # Sem conversa_id, a pergunta abre uma conversa nova com esses
+    # documentos; com ele, continua a conversa existente (os documentos
+    # pedidos precisam ser dela, ou um subconjunto dela).
+    conversa_id: int | None = None
+
+
+class NovaConversaRequest(BaseModel):
+    """Corpo de POST /conversas: os documentos (1 a 2, como em PerguntaRequest) que ela consulta."""
+
+    documento_ids: list[int] = Field(min_length=1, max_length=2)
+
+
+class VincularDocumentoRequest(BaseModel):
+    """Corpo de POST /conversas/{id}/documentos: o documento a acrescentar à conversa."""
+
+    documento_id: int
 
 
 class Citacao(BaseModel):
@@ -72,3 +88,28 @@ class RespostaResponse(BaseModel):
 
     resposta: str
     citacoes: list[Citacao]
+    # A conversa onde a pergunta foi registrada: a que o cliente pediu,
+    # ou a que acabou de nascer quando ele não pediu nenhuma.
+    conversa_id: int
+
+
+class MensagemResponse(BaseModel):
+    """Uma pergunta e a resposta dela, como foram gravadas na conversa."""
+
+    id: int
+    pergunta: str
+    resposta: str
+    citacoes: list[Citacao]
+
+
+class ConversaResponse(BaseModel):
+    """Uma conversa na estante: os documentos dela dão o título da lombada."""
+
+    id: int
+    documentos: list[DocumentoResponse]
+
+
+class ConversaDetalheResponse(ConversaResponse):
+    """GET /conversas/{id}: a conversa com todo o histórico de mensagens."""
+
+    mensagens: list[MensagemResponse]

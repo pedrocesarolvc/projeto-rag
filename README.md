@@ -85,7 +85,7 @@ escolha em si. O raciocínio completo de cada uma está em `docs/documentacao.md
 | **Ollama roda no host, fora do `docker-compose.yml`** | É um runtime pesado (modelo de alguns GB) que faz mais sentido como pré-requisito instalado uma vez do que reconstruído a cada `docker compose up`. O app o alcança via `host.docker.internal` — os dois serviços do compose continuam sendo só aplicação e banco (Etapa 7) |
 | **Cadastro adiado: conta exigida só na primeira pergunta**, não no upload | Pedir cadastro antes do usuário ver qualquer valor é a forma mais eficiente de perdê-lo. Adiar a barreira transforma o cadastro em preservação do documento já processado, não em pedágio (Etapa 1, seção 1.5) |
 | **Sessão anônima com adoção no cadastro/login** | Entre o upload e a conta, o documento pertence a um token de sessão anônima. Cadastro e login transferem esses documentos para o usuário — na mesma transação da criação da conta, para nunca cadastrar sem entregar o que motivou o cadastro (Etapa 7, seção 7.3) |
-| **Conversas como lombadas numa estante** | Cada assunto vive numa conversa, e a lombada do livro leva o nome dos PDFs enviados — a metáfora do nome "Lastro": o documento é a base de cada resposta. Tons frios de fundo, madeira nas lombadas e latão nas ações; texto e fundo conferidos para contraste. No celular a estante vira uma faixa no topo. As conversas ainda só vivem na janela aberta (o servidor não guarda histórico), e cada pergunta continua independente das anteriores, para não mexer no prompt, onde mora o grounding (Etapa 7) |
+| **Conversas como lombadas numa estante** | Cada assunto vive numa conversa, e a lombada do livro leva o nome dos PDFs enviados — a metáfora do nome "Lastro": o documento é a base de cada resposta. Tons frios de fundo, madeira nas lombadas e latão nas ações; texto e fundo conferidos para contraste. No celular a estante vira uma faixa no topo. As conversas ficam guardadas no servidor (tabelas `conversas`, `conversa_documentos` e `mensagens`), com as citações gravadas dentro de cada mensagem para o histórico continuar legível mesmo se um PDF for removido. Cada pergunta continua independente das anteriores: o histórico é para o usuário reler, e o Lastro não "lembra" da conversa ao responder, para não mexer no prompt, onde mora o grounding (Etapa 7) |
 | **Até 2 PDFs por pergunta, com top-k por documento** | A pergunta junta o conhecimento dos dois PDFs, e cada citação diz de qual arquivo veio; desmarcar um na tela faz a pergunta valer só para o outro. O top-k é por documento, não global, para um PDF não ocupar todas as vagas e esconder o outro. O teto de 2 é do v1, não do desenho (Etapas 5 e 7) |
 
 ## Limitações conhecidas (v1) e roadmap
@@ -133,6 +133,8 @@ app/
 ├── auth/                      # Etapa 7 — cadastro adiado (seção 1.5) e adoção de sessão (seção 7.3)
 │   ├── seguranca.py            # hash de senha e token — sem tocar no banco
 │   └── armazenador.py          # tabela usuarios + adoção de documentos
+├── conversas/                  # cada assunto é uma conversa — a lombada da estante
+│   └── armazenador.py          # tabelas conversas, conversa_documentos e mensagens
 ├── ingestao/                 # Etapa 2
 │   ├── upload.py             # validação e guarda do arquivo
 │   └── extrator.py           # PDF → texto, página por página
@@ -160,6 +162,8 @@ tests/
 ├── test_buscador_unitario.py
 ├── test_auth_seguranca.py
 ├── test_auth_armazenador.py
+├── test_conversas_armazenador.py   # criar, listar, mensagens e as duas formas de apagar
+├── test_conversas_api.py           # as rotas de conversa e o isolamento entre usuários
 ├── test_pipeline.py           # eh_dono() — a regra de acesso
 ├── test_prompt.py
 ├── test_responder.py
@@ -186,7 +190,9 @@ testes de integração (`test_armazenador.py`, `test_auth_armazenador.py`, `test
 `test_e2e.py`) só rodam se `DATABASE_URL` apontar para um Postgres com a extensão `vector` já
 instalada; caso contrário, pulam automaticamente — no Windows sem Docker, pgvector não tem
 binário pronto e exigiria compilar com Visual Studio Build Tools, então o caminho recomendado ali
-é o Docker mesmo. Nenhum teste chama o Ollama de verdade fora de `test_e2e.py`: `llm.gerar()` é
+é o Docker mesmo. Atenção: esses testes dão `TRUNCATE` em todas as tabelas, então se recusam a
+rodar contra um banco que não seja local (para não apagar os dados de uma instância pública); para
+usar outro banco descartável, defina `TESTES_PODEM_APAGAR_O_BANCO=1`. Nenhum teste chama o Ollama de verdade fora de `test_e2e.py`: `llm.gerar()` é
 substituído por um dublê (mock) no resto da suíte.
 
 Para rodar a API sozinha (sem o frontend buildado):
